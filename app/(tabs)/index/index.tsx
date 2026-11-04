@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Alert, ActivityIndicator, Switch, Pressable, Animated, Easing } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import { api, adviceStream, StatusResp, RecentActivity } from '../../../src/api';
+import { api, adviceStream, authApi, logout, StatusResp, RecentActivity } from '../../../src/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Markdown } from '../../../src/markdown';
 import {
@@ -65,6 +65,8 @@ export default function TodayScreen() {
   const [adviceErr, setAdviceErr] = React.useState<string | null>(null);
   const [rem, setRem] = React.useState<ReminderSettings>({ enabled: false, hour: 7, minute: 20 });
   const [remBusy, setRemBusy] = React.useState(false);
+  /** 当前登录的是谁（只用来在「账号」里显示，不参与业务） */
+  const [me, setMe] = React.useState<{ username?: string; display_name?: string; legacy?: boolean } | null>(null);
 
   React.useEffect(() => {
     getReminderSettings().then(setRem);
@@ -124,6 +126,7 @@ export default function TodayScreen() {
   const firstFocus = React.useRef(true);
   useFocusEffect(
     React.useCallback(() => {
+      authApi.me().then(setMe).catch(() => {});
       if (firstFocus.current) {
         firstFocus.current = false;
         load();
@@ -132,6 +135,13 @@ export default function TodayScreen() {
       load(true);
     }, [load])
   );
+
+  const onLogout = () => {
+    Alert.alert('退出登录', '退出后需要重新输入用户名和密码。本地不会删除任何训练数据。', [
+      { text: '取消', style: 'cancel' },
+      { text: '退出', style: 'destructive', onPress: () => logout() },
+    ]);
+  };
 
   const onSync = async (all = false) => {
     setSyncing(all ? '全量' : '增量');
@@ -439,12 +449,29 @@ export default function TodayScreen() {
         </List>
       </Section>
 
+      {/* ---------- 账号 ---------- */}
+      <Section title="账号">
+        <List>
+          <ListRow
+            title={me?.display_name || '当前账号'}
+            sub={
+              me?.username
+                ? `@${me.username} · 数据只有你自己能看到`
+                : me?.legacy
+                  ? '用访问口令登录 · 建议改成账号密码'
+                  : '加载中…'
+            }
+          />
+          <ListRow title="退出登录" onPress={onLogout} chevron />
+        </List>
+      </Section>
+
       {/* ---------- 数据 ---------- */}
       <Section title="数据">
         <List>
           <ListRow
             title="数据源"
-            sub="佳明 / Oura / Strava，可同时连多个"
+            sub="佳明 / Oura，可同时连多个"
             onPress={() => router.push('/sources')}
             chevron
           />

@@ -1,200 +1,301 @@
-/* 访问口令校验：服务器返回 401 时自动弹出输入框，输对一次后永久记住。
+/* 登录门：没登录就只显示登录页，登录后存 token，随每个请求发 X-RC-Token。
  *
- * 口令存在 AsyncStorage 里，随每次请求以 X-RC-Token 头发给服务器。
- * 服务器没设口令（ACCESS_TOKEN 为空）时这个弹窗永远不会出现。
+ * 三种入口
+ * --------
+ * 1. setup  —— 这台服务器上还没有任何账号，让用户创建第一个（继承现有数据）
+ * 2. login  —— 用户名 + 密码
+ * 3. legacy —— 老的服务器访问口令，给还没建账号的自己留的后路
+ *
+ * 为什么要「第一个账号继承 owner」
+ * ------------------------------
+ * 库里几百条佳明活动、记忆、跑鞋都挂在 owner 名下。第一个注册的人就是这些
+ * 数据的主人，直接接管；第二个人开始才是全新的空账号。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { registerTokenPrompt, setAccessToken } from './api';
-import { R, S, T, alpha, type Theme } from './theme';
+import { authApi, getAccessToken, registerLogoutHandler, registerTokenPrompt, setAccessToken } from './api';
+import { R, S, T, type Theme } from './theme';
 import { makeStyles, useTheme } from './theme-provider';
 
-type Props = { children: React.ReactNode };
+type Phase = 'checking' | 'login' | 'ready';
+type Mode = 'setup' | 'login' | 'legacy';
 
-export function TokenGate({ children }: Props) {
+export function TokenGate({ children }: { children: React.ReactNode }) {
   const th = useTheme();
   const s = useStyles();
-  const [visible, setVisible] = useState(false);
-  const [input, setInput] = useState('');
+
+  const [phase, setPhase] = useState<Phase>('checking');
+  const [mode, setMode] = useState<Mode>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [invite, setInvite] = useState('');
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState('');
-  const waiters = useRef<Array<(v: string | null) => void>>([]);
+  const [bootError, setBootError] = useState('');
 
-  /** 弹出窗口，等用户给个结果（多个请求同时 401 时只弹一次，一起等同一个结果） */
-  const ask = useCallback(() => {
-    setVisible(true);
-    setHint('');
-    return new Promise<string | null>((resolve) => {
-      waiters.current.push(resolve);
-    });
-  }, []);
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
 
-  const settle = useCallback((value: string | null) => {
-    setVisible(false);
-    setInput('');
-    setBusy(false);
-    const list = waiters.current;
-    waiters.current = [];
-    list.forEach((fn) => fn(value));
+  /* 启动时问服务器：有没有账号、我手里的 token 还有效吗 */
+  const boot = useCallback(async () => {
+    setBootError('');
+    setPhase('checking');
+    try {
+      const st = await authApi.status();
+      if (st.needs_setup) {
+        setMode('setup');
+        setPhase('login');
+        return;
+      }
+      if (getAccessToken()) {
+        try {
+          await authApi.me();
+          setPhase('ready');
+          return;
+        } catch {
+          /* token 过期或口令变了，落到登录页 */
+        }
+      }
+      setMode('login');
+      setPhase('login');
+    } catch (e: any) {
+      // 连不上服务器时也给登录页，让用户能看到错误并重试
+      setBootError(e?.message || '连不上服务器');
+      setMode('login');
+      setPhase('login');
+    }
   }, []);
 
   useEffect(() => {
-    registerTokenPrompt(ask);
-    return () => registerTokenPrompt(null);
-  }, [ask]);
+    boot();
+  }, [boot]);
+
+  /* 用着用着 token 失效（90 天到期 / 服务器换了密钥）→ 回到登录页 */
+  useEffect(() => {
+    registerTokenPrompt(() => {
+      if (phaseRef.current === 'ready') setPhase('login');
+      return Promise.resolve(null);
+    });
+    registerLogoutHandler(() => {
+      setUsername('');
+      setPassword('');
+      setInvite('');
+      setHint('');
+      setMode('login');
+      setPhase('login');
+    });
+    return () => {
+      registerTokenPrompt(null);
+      registerLogoutHandler(null);
+    };
+  }, []);
 
   const submit = useCallback(async () => {
-    const v = input.trim();
-    if (!v) {
-      setHint('口令不能为空');
+    setHint('');
+    if (mode === 'legacy') {
+      const v = password.trim();
+      if (!v) return setHint('请填写访问口令');
+      setBusy(true);
+      try {
+        await setAccessToken(v);
+        await authApi.me(); // 口令不对会 401
+        setPhase('ready');
+      } catch {
+        setHint('访问口令不对');
+      } finally {
+        setBusy(false);
+      }
       return;
     }
+
+    if (mode === 'setup') {
+      if (!/^[A-Za-z0-9_]{3,30}$/.test(username.trim())) {
+        return setHint('用户名只能用字母、数字、下划线，3-30 位');
+      }
+      if (password.length < 6) return setHint('密码至少 6 位');
+      setBusy(true);
+      try {
+        const r = await authApi.register(username.trim(), password, invite.trim());
+        await setAccessToken(r.token);
+        setPhase('ready');
+      } catch (e: any) {
+        setHint(e?.message || '创建失败');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    if (!username.trim() || !password) return setHint('用户名和密码都要填');
     setBusy(true);
-    await setAccessToken(v);
-    // 不在这里判断对错：请求会带着新口令重试，还不对就会再弹一次
-    settle(v);
-  }, [input, settle]);
+    try {
+      const r = await authApi.login(username.trim(), password);
+      await setAccessToken(r.token);
+      setPhase('ready');
+    } catch (e: any) {
+      setHint(e?.message || '登录失败');
+    } finally {
+      setBusy(false);
+    }
+  }, [mode, username, password, invite]);
+
+  if (phase === 'ready') return <>{children}</>;
+
+  if (phase === 'checking') {
+    return (
+      <View style={[s.full, { backgroundColor: th.bg }]}>
+        <ActivityIndicator color={th.text3} />
+        <Text style={[s.checkingText, { color: th.text3 }]}>正在连接服务器…</Text>
+      </View>
+    );
+  }
+
+  const title =
+    mode === 'setup' ? '创建第一个账号' : mode === 'legacy' ? '用访问口令进入' : '登录';
+  const desc =
+    mode === 'setup'
+      ? '这台服务器还没有账号。第一个账号会接管已有的全部训练数据（佳明同步下来的活动、记忆、跑鞋）。'
+      : mode === 'legacy'
+        ? '口令就是服务器配置文件里的 ACCESS_TOKEN。适合还没建账号的自己先用着。'
+        : '用你在这台服务器上注册的账号登录。';
 
   return (
-    <>
-      {children}
-      <Modal visible={visible} transparent animationType="fade" onRequestClose={() => settle(null)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={[s.mask, { backgroundColor: th.dark ? 'rgba(0,0,0,0.68)' : 'rgba(20,24,30,0.42)' }]}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={[s.full, { backgroundColor: th.bg }]}
+    >
+      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+        <Text style={[s.brand, { color: th.text }]}>AI 跑步教练</Text>
+        <Text style={[s.title, { color: th.text }]}>{title}</Text>
+        <Text style={[s.desc, { color: th.text2 }]}>{desc}</Text>
+
+        {mode !== 'legacy' ? (
+          <TextInput
+            value={username}
+            onChangeText={(v) => {
+              setUsername(v);
+              if (hint) setHint('');
+            }}
+            placeholder="用户名"
+            placeholderTextColor={th.text3}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username"
+            style={[s.input, { backgroundColor: th.bgSoft, borderColor: th.borderSoft, color: th.text }]}
+          />
+        ) : null}
+
+        <TextInput
+          value={password}
+          onChangeText={(v) => {
+            setPassword(v);
+            if (hint) setHint('');
+          }}
+          placeholder={mode === 'legacy' ? '访问口令' : '密码'}
+          placeholderTextColor={th.text3}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          style={[s.input, { backgroundColor: th.bgSoft, borderColor: th.borderSoft, color: th.text }]}
+        />
+
+        {mode === 'setup' ? (
+          <TextInput
+            value={invite}
+            onChangeText={(v) => {
+              setInvite(v);
+              if (hint) setHint('');
+            }}
+            placeholder="邀请码（服务器访问口令）"
+            placeholderTextColor={th.text3}
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+            style={[s.input, { backgroundColor: th.bgSoft, borderColor: th.borderSoft, color: th.text }]}
+          />
+        ) : null}
+
+        {hint ? <Text style={[s.hint, { color: th.bad }]}>{hint}</Text> : null}
+        {bootError ? <Text style={[s.hint, { color: th.warn }]}>{bootError}</Text> : null}
+
+        <Pressable
+          onPress={submit}
+          disabled={busy}
+          style={({ pressed }) => [
+            s.primary,
+            { backgroundColor: th.accent, opacity: pressed || busy ? 0.82 : 1 },
+          ]}
         >
-          <View style={[s.card, { backgroundColor: th.card }]}>
-            <Text style={s.title}>需要访问口令</Text>
-            <Text style={s.desc}>
-              这台服务器设了口令，输入一次以后就不用再输了。{'\n'}
-              口令就是服务器配置文件里的 <Text style={s.code}>ACCESS_TOKEN</Text>。
+          {busy ? (
+            <ActivityIndicator color={th.accentInk} size="small" />
+          ) : (
+            <Text style={[s.primaryText, { color: th.accentInk }]}>
+              {mode === 'setup' ? '创建并进入' : '登录'}
             </Text>
+          )}
+        </Pressable>
 
-            <TextInput
-              value={input}
-              onChangeText={(v) => {
-                setInput(v);
-                if (hint) setHint('');
-              }}
-              placeholder="请输入访问口令"
-              placeholderTextColor={th.text3}
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-              style={[
-                s.input,
-                {
-                  backgroundColor: th.bgSoft,
-                  borderColor: th.borderSoft,
-                  color: th.text,
-                },
-              ]}
-              onSubmitEditing={submit}
-              returnKeyType="done"
-            />
-            {hint ? <Text style={s.hint}>{hint}</Text> : null}
-
-            <View style={s.row}>
-              <Pressable
-                onPress={() => settle(null)}
-                style={({ pressed }) => [
-                  s.btn,
-                  { backgroundColor: th.bgSoft, opacity: pressed ? 0.72 : 1 },
-                ]}
-              >
-                <Text style={[s.btnText, { color: th.text2 }]}>取消</Text>
-              </Pressable>
-              <Pressable
-                onPress={submit}
-                disabled={busy}
-                style={({ pressed }) => [
-                  s.btn,
-                  { backgroundColor: th.accent, opacity: pressed ? 0.82 : 1 },
-                ]}
-              >
-                {busy ? (
-                  <ActivityIndicator color={th.accentInk} size="small" />
-                ) : (
-                  <Text style={[s.btnText, { color: th.accentInk, fontWeight: '600' }]}>确定</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-    </>
+        <View style={s.links}>
+          {mode === 'login' ? (
+            <Pressable onPress={() => { setMode('legacy'); setHint(''); setPassword(''); }}>
+              <Text style={[s.link, { color: th.text3 }]}>只有访问口令？点这里</Text>
+            </Pressable>
+          ) : null}
+          {mode === 'legacy' ? (
+            <Pressable onPress={() => { setMode('login'); setHint(''); setPassword(''); }}>
+              <Text style={[s.link, { color: th.text3 }]}>返回账号登录</Text>
+            </Pressable>
+          ) : null}
+          {mode === 'setup' ? (
+            <Pressable onPress={() => { setMode('login'); setHint(''); }}>
+              <Text style={[s.link, { color: th.text3 }]}>已经有账号了</Text>
+            </Pressable>
+          ) : null}
+          {mode === 'login' ? (
+            <Pressable onPress={boot}>
+              <Text style={[s.link, { color: th.text3 }]}>重试连接</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const useStyles = makeStyles((t: Theme) => ({
-  mask: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: S.xl,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 360,
-    borderRadius: R.xl,
-    padding: S.xl - 2,
-    borderWidth: t.bordered ? StyleSheet.hairlineWidth : 0,
-    borderColor: t.border,
-  },
-  title: {
-    fontSize: T.title + 2,
-    fontWeight: '600',
-    color: t.text,
-    letterSpacing: -0.3,
-    marginBottom: S.sm,
-  },
-  desc: {
-    fontSize: T.body2,
-    lineHeight: 21,
-    color: t.text2,
-    marginBottom: S.lg,
-  },
-  code: {
-    color: t.accent,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: T.caption,
-  },
+  full: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  checkingText: { marginTop: S.md, fontSize: T.caption },
+  scroll: { flexGrow: 1, justifyContent: 'center', padding: S.xl, width: '100%', maxWidth: 420 },
+  brand: { fontSize: T.caption, letterSpacing: 2, opacity: 0.5, marginBottom: S.lg },
+  title: { fontSize: T.title + 4, fontWeight: '700', letterSpacing: -0.5, marginBottom: S.sm },
+  desc: { fontSize: T.body2, lineHeight: 21, marginBottom: S.lg },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: R.md,
     paddingHorizontal: S.md,
     paddingVertical: 14,
     fontSize: 17,
+    marginBottom: S.sm + 2,
   },
-  hint: {
-    marginTop: S.sm,
-    fontSize: T.caption,
-    color: t.bad,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: S.sm + 2,
-    marginTop: S.lg,
-  },
-  btn: {
-    flex: 1,
-    height: 50,
+  hint: { fontSize: T.caption, marginTop: 2, marginBottom: S.sm },
+  primary: {
+    height: 52,
     borderRadius: R.md,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: S.md,
   },
-  btnText: {
-    fontSize: T.body + 1,
-    fontWeight: '500',
-  },
+  primaryText: { fontSize: T.body + 1, fontWeight: '600' },
+  links: { marginTop: S.lg, gap: S.sm, alignItems: 'center' },
+  link: { fontSize: T.caption },
 }));

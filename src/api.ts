@@ -37,6 +37,19 @@ export async function setAccessToken(t: string) {
   }
 }
 
+/** 退出登录后要做的事（登录门注册进来，用来把界面切回登录页） */
+let logoutHandler: (() => void) | null = null;
+
+export function registerLogoutHandler(fn: (() => void) | null) {
+  logoutHandler = fn;
+}
+
+/** 清掉本地凭据并回到登录页。服务器那边 token 是无状态的，删本地就够了。 */
+export async function logout() {
+  await setAccessToken('');
+  logoutHandler?.();
+}
+
 const ready: Promise<void> = (async () => {
   try {
     const [saved, token] = await Promise.all([
@@ -172,7 +185,8 @@ async function request<T = any>(
   path: string,
   options: RequestInit = {},
   timeoutMs = DEFAULT_TIMEOUT,
-  retried = false
+  retried = false,
+  promptOn401 = true
 ): Promise<T> {
   await ready;
   const bases = orderedBases();
@@ -190,7 +204,7 @@ async function request<T = any>(
 
       if (bizFail) {
         // 口令不对：请用户输入一次，然后重试
-        if (bizFail.status === 401 && !retried && askTokenHandler) {
+        if (bizFail.status === 401 && !retried && askTokenHandler && promptOn401) {
           askTokenHandler()
             .then((t) => {
               if (!t) return reject(new Error('需要访问口令，请在设置里填写'));
@@ -294,6 +308,49 @@ export const api = {
   },
 
   qs,
+};
+
+/* ---------------- 登录 ---------------- */
+/**
+ * 登录相关接口单独走一套：401 时不弹「访问口令」框。
+ * 那套自动重试是给「口令过期」用的；登录页自己要能拿到 401 去提示
+ * 「用户名或密码不对」，否则会弹一个不相干的输入框盖在上面。
+ */
+export const authApi = {
+  status: <T = any>() => request<T>('/api/auth/status', {}, DEFAULT_TIMEOUT, false, false),
+
+  login: <T = any>(username: string, password: string) =>
+    request<T>(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      },
+      DEFAULT_TIMEOUT,
+      false,
+      false
+    ),
+
+  register: <T = any>(username: string, password: string, invite: string, displayName = '') =>
+    request<T>(
+      '/api/auth/register',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username,
+          password,
+          invite,
+          display_name: displayName,
+        }),
+      },
+      DEFAULT_TIMEOUT,
+      false,
+      false
+    ),
+
+  me: <T = any>() => request<T>('/api/auth/me', {}, DEFAULT_TIMEOUT, false, false),
 };
 
 /* ---------------- 流式对话（SSE） ---------------- */
