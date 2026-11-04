@@ -1,0 +1,224 @@
+import React from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { api } from '../src/api';
+import { Screen, Section, Card, Btn } from '../src/ui';
+import { S, T, type Theme } from '../src/theme';
+import { makeStyles, useTheme } from '../src/theme-provider';
+
+interface Profile {
+  athlete_name: string;
+  goal: string;
+  weekly_days: string;
+  five_k_pb_min: string;
+  weight_kg: string;
+  race_date: string;
+}
+
+/** 分数字符串 → "23:30" 这种好读的格式 */
+function pbText(v: string) {
+  const n = parseFloat(v);
+  if (!v || !isFinite(n)) return '';
+  const m = Math.floor(n);
+  const s = Math.round((n - m) * 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** "23:30" / "23.5" → 分钟数 */
+function parsePb(text: string): string | null {
+  const s = text.trim();
+  if (!s) return '';
+  const m = s.match(/^(\d{1,2})\s*[:'′]\s*(\d{1,2})?$/);
+  if (m) {
+    const mm = Number(m[1]);
+    const ss = Number(m[2] || 0);
+    if (ss >= 60) return null;
+    return (mm + ss / 60).toFixed(2);
+  }
+  const n = Number(s);
+  if (!isFinite(n)) return null;
+  return n.toFixed(2);
+}
+
+export default function ProfileScreen() {
+  const t = useTheme();
+  const s = useStyles();
+  const router = useRouter();
+
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [f, setF] = React.useState<Profile>({
+    athlete_name: '',
+    goal: '',
+    weekly_days: '4',
+    five_k_pb_min: '',
+    weight_kg: '',
+    race_date: '',
+  });
+
+  React.useEffect(() => {
+    api
+      .get<{ profile: Profile }>('/api/profile')
+      .then((r) => {
+        setF({
+          athlete_name: r.profile.athlete_name || '',
+          goal: r.profile.goal || '',
+          weekly_days: r.profile.weekly_days || '4',
+          five_k_pb_min: r.profile.five_k_pb_min || '',
+          weight_kg: r.profile.weight_kg || '',
+          race_date: r.profile.race_date || '',
+        });
+      })
+      .catch((e: any) => setErr(e?.message || '读取失败'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setErr('');
+    const pb = parsePb(f.five_k_pb_min);
+    if (pb === null) return setErr('5 公里成绩填成 23:30 这样的格式');
+    const days = Number(f.weekly_days || 4);
+    if (!Number.isFinite(days) || days < 1 || days > 7) return setErr('每周训练天数填 1–7');
+
+    setSaving(true);
+    try {
+      await api.put('/api/profile', {
+        athlete_name: f.athlete_name.trim(),
+        goal: f.goal.trim(),
+        weekly_days: String(Math.round(days)),
+        five_k_pb_min: pb,
+        weight_kg: f.weight_kg.trim(),
+        race_date: f.race_date.trim(),
+      });
+      Alert.alert('已保存', '训练配速和计划会按你的成绩重新计算。', [
+        { text: '好', onPress: () => router.back() },
+      ]);
+    } catch (e: any) {
+      setErr(e?.message || '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[s.center, { backgroundColor: t.bg }]}>
+        <ActivityIndicator color={t.text2} />
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: t.bg }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: S.xl }}>
+        <Section title="你的情况" desc="这些数字决定配速区间，填错会练错">
+          <Card>
+            <Field label="称呼" value={f.athlete_name} onChange={(v) => setF({ ...f, athlete_name: v })} placeholder="怎么称呼你" />
+            <Field label="目标" value={f.goal} onChange={(v) => setF({ ...f, goal: v })} placeholder="例如：半马破 1:45 / 健康跑" />
+            <Field
+              label="5 公里最好成绩"
+              value={f.five_k_pb_min}
+              onChange={(v) => setF({ ...f, five_k_pb_min: v })}
+              placeholder="23:30"
+              keyboard="numbers-and-punctuation"
+              hint="按 分:秒 填。没有比赛成绩，就填最近一次全力跑 5 公里的时间。"
+            />
+            <Field
+              label="每周能练几天"
+              value={f.weekly_days}
+              onChange={(v) => setF({ ...f, weekly_days: v })}
+              placeholder="4"
+              keyboard="number-pad"
+              hint="1–7。少一点没关系，按实际能坚持的填。"
+            />
+            <Field
+              label="体重（kg）"
+              value={f.weight_kg}
+              onChange={(v) => setF({ ...f, weight_kg: v })}
+              placeholder="65"
+              keyboard="decimal-pad"
+              hint="只用于估算补给量，可以不填。"
+            />
+            <Field
+              label="比赛日期"
+              value={f.race_date}
+              onChange={(v) => setF({ ...f, race_date: v })}
+              placeholder="2027-03-21"
+              keyboard="numbers-and-punctuation"
+              hint="填了才会按比赛倒排周期，不填就按 12 周通用安排。"
+            />
+          </Card>
+        </Section>
+
+        {err ? <Text style={[s.err, { color: t.bad }]}>{err}</Text> : null}
+
+        <View style={{ paddingHorizontal: S.md, marginTop: S.md }}>
+          <Btn title={saving ? '保存中…' : '保存'} onPress={save} primary disabled={saving} />
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+  keyboard,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  hint?: string;
+  keyboard?: 'default' | 'number-pad' | 'decimal-pad' | 'numbers-and-punctuation';
+}) {
+  const t = useTheme();
+  const s = useStyles();
+  return (
+    <View style={s.field}>
+      <Text style={[s.label, { color: t.text2 }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={t.text3}
+        keyboardType={keyboard === 'numbers-and-punctuation' ? 'numbers-and-punctuation' : keyboard}
+        autoCapitalize="none"
+        style={[s.input, { color: t.text, backgroundColor: t.bgSoft, borderColor: t.borderSoft }]}
+      />
+      {hint ? <Text style={[s.hint, { color: t.text3 }]}>{hint}</Text> : null}
+    </View>
+  );
+}
+
+const useStyles = makeStyles((t: Theme) => ({
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  field: { marginBottom: S.md },
+  label: { fontSize: T.caption, marginBottom: 6 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: S.md - 2,
+    paddingVertical: 12,
+    fontSize: 17,
+  },
+  hint: { fontSize: T.micro, lineHeight: 17, marginTop: 5 },
+  err: { fontSize: T.caption, paddingHorizontal: S.md, marginTop: S.sm },
+}));

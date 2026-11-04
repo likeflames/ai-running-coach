@@ -1,15 +1,11 @@
-/* 登录门：没登录就只显示登录页，登录后存 token，随每个请求发 X-RC-Token。
+/* 登录门：没登录只显示登录页，登录后存 token，每个请求带 X-RC-Token。
  *
- * 三种入口
- * --------
- * 1. setup  —— 这台服务器上还没有任何账号，让用户创建第一个（继承现有数据）
- * 2. login  —— 用户名 + 密码
- * 3. legacy —— 老的服务器访问口令，给还没建账号的自己留的后路
- *
- * 为什么要「第一个账号继承 owner」
- * ------------------------------
- * 库里几百条佳明活动、记忆、跑鞋都挂在 owner 名下。第一个注册的人就是这些
- * 数据的主人，直接接管；第二个人开始才是全新的空账号。
+ * 分发版的规则
+ * ------------
+ * 1. 只有两条路：登录 / 注册（邀请码）。
+ * 2. 没有「访问口令直接进」—— 那等于把部署者的账号借给别人。
+ * 3. 登录成功后按会话代际重挂子树：切账号时所有页面 state 归零，
+ *    不会把上一个人的建议、列表留在屏幕上。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -23,12 +19,19 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { authApi, getAccessToken, registerLogoutHandler, registerTokenPrompt, setAccessToken } from './api';
+import {
+  authApi,
+  getAccessToken,
+  getSessionGeneration,
+  registerLogoutHandler,
+  registerTokenPrompt,
+  setAccessToken,
+} from './api';
 import { R, S, T, type Theme } from './theme';
 import { makeStyles, useTheme } from './theme-provider';
 
 type Phase = 'checking' | 'login' | 'ready';
-type Mode = 'setup' | 'login' | 'legacy';
+type Mode = 'login' | 'register';
 
 export function TokenGate({ children }: { children: React.ReactNode }) {
   const th = useTheme();
@@ -38,7 +41,10 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
   const [mode, setMode] = useState<Mode>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [password2, setPassword2] = useState('');
   const [invite, setInvite] = useState('');
+  const [inviteRequired, setInviteRequired] = useState(true);
+  const [registrationEnabled, setRegistrationEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState('');
   const [bootError, setBootError] = useState('');
@@ -46,31 +52,26 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
-  /* 启动时问服务器：有没有账号、我手里的 token 还有效吗 */
   const boot = useCallback(async () => {
     setBootError('');
     setPhase('checking');
     try {
       const st = await authApi.status();
-      if (st.needs_setup) {
-        setMode('setup');
-        setPhase('login');
-        return;
-      }
+      setRegistrationEnabled(st.registration_enabled !== false);
+      setInviteRequired(st.invite_required !== false);
       if (getAccessToken()) {
         try {
           await authApi.me();
           setPhase('ready');
           return;
         } catch {
-          /* token 过期或口令变了，落到登录页 */
+          /* token 过期或已被吊销，回登录页 */
         }
       }
       setMode('login');
       setPhase('login');
     } catch (e: any) {
-      // 连不上服务器时也给登录页，让用户能看到错误并重试
-      setBootError(e?.message || '连不上服务器');
+      setBootError(e?.message || '连不上服务器，检查网络后重试');
       setMode('login');
       setPhase('login');
     }
@@ -80,7 +81,7 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
     boot();
   }, [boot]);
 
-  /* 用着用着 token 失效（90 天到期 / 服务器换了密钥）→ 回到登录页 */
+  /* 用着用着 token 失效（90 天到期 / 改了密码 / 在别处退出）→ 回登录页 */
   useEffect(() => {
     registerTokenPrompt(() => {
       if (phaseRef.current === 'ready') setPhase('login');
@@ -89,6 +90,7 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
     registerLogoutHandler(() => {
       setUsername('');
       setPassword('');
+      setPassword2('');
       setInvite('');
       setHint('');
       setMode('login');
@@ -102,98 +104,82 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
 
   const submit = useCallback(async () => {
     setHint('');
-    if (mode === 'legacy') {
-      const v = password.trim();
-      if (!v) return setHint('请填写访问口令');
-      setBusy(true);
-      try {
-        await setAccessToken(v);
-        await authApi.me(); // 口令不对会 401
-        setPhase('ready');
-      } catch {
-        setHint('访问口令不对');
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
+    if (!username.trim() || !password) return setHint('用户名和密码都要填');
 
-    if (mode === 'setup') {
+    if (mode === 'register') {
       if (!/^[A-Za-z0-9_]{3,30}$/.test(username.trim())) {
         return setHint('用户名只能用字母、数字、下划线，3-30 位');
       }
-      if (password.length < 6) return setHint('密码至少 6 位');
-      setBusy(true);
-      try {
-        const r = await authApi.register(username.trim(), password, invite.trim());
-        await setAccessToken(r.token);
-        setPhase('ready');
-      } catch (e: any) {
-        setHint(e?.message || '创建失败');
-      } finally {
-        setBusy(false);
-      }
-      return;
+      if (password.length < 8) return setHint('密码至少 8 位');
+      if (password !== password2) return setHint('两次输入的密码不一样');
+      if (inviteRequired && !invite.trim()) return setHint('需要邀请码');
     }
 
-    if (!username.trim() || !password) return setHint('用户名和密码都要填');
     setBusy(true);
     try {
-      const r = await authApi.login(username.trim(), password);
+      const r =
+        mode === 'register'
+          ? await authApi.register(username.trim(), password, invite.trim())
+          : await authApi.login(username.trim(), password);
       await setAccessToken(r.token);
+      setPassword('');
+      setPassword2('');
       setPhase('ready');
     } catch (e: any) {
-      setHint(e?.message || '登录失败');
+      setHint(e?.message || (mode === 'register' ? '注册失败' : '登录失败'));
     } finally {
       setBusy(false);
     }
-  }, [mode, username, password, invite]);
+  }, [mode, username, password, password2, invite, inviteRequired]);
 
-  if (phase === 'ready') return <>{children}</>;
+  // key 换成会话代际：切账号时整棵子树重建，旧 state 不会带过去
+  if (phase === 'ready') {
+    return <React.Fragment key={getSessionGeneration()}>{children}</React.Fragment>;
+  }
 
   if (phase === 'checking') {
     return (
       <View style={[s.full, { backgroundColor: th.bg }]}>
         <ActivityIndicator color={th.text3} />
-        <Text style={[s.checkingText, { color: th.text3 }]}>正在连接服务器…</Text>
+        <Text style={[s.checkingText, { color: th.text3 }]}>正在准备…</Text>
       </View>
     );
   }
 
-  const title =
-    mode === 'setup' ? '创建第一个账号' : mode === 'legacy' ? '用访问口令进入' : '登录';
-  const desc =
-    mode === 'setup'
-      ? '这台服务器还没有账号。第一个账号会接管已有的全部训练数据（佳明同步下来的活动、记忆、跑鞋）。'
-      : mode === 'legacy'
-        ? '口令就是服务器配置文件里的 ACCESS_TOKEN。适合还没建账号的自己先用着。'
-        : '用你在这台服务器上注册的账号登录。';
+  const isRegister = mode === 'register';
+  const title = isRegister ? '创建账号' : '登录';
+  const desc = isRegister
+    ? '每个账号的数据互相独立，别人看不到你的训练和对话。'
+    : '用你的账号登录，训练数据只有你自己能看到。';
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[s.full, { backgroundColor: th.bg }]}
     >
-      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={[s.brand, { color: th.text }]}>AI 跑步教练</Text>
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+      >
+        <Text style={[s.brand, { color: th.text2 }]}>AI 跑步教练</Text>
         <Text style={[s.title, { color: th.text }]}>{title}</Text>
         <Text style={[s.desc, { color: th.text2 }]}>{desc}</Text>
 
-        {mode !== 'legacy' ? (
-          <TextInput
-            value={username}
-            onChangeText={(v) => {
-              setUsername(v);
-              if (hint) setHint('');
-            }}
-            placeholder="用户名"
-            placeholderTextColor={th.text3}
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="username"
-            style={[s.input, { backgroundColor: th.bgSoft, borderColor: th.borderSoft, color: th.text }]}
-          />
-        ) : null}
+        <TextInput
+          value={username}
+          onChangeText={(v) => {
+            setUsername(v);
+            if (hint) setHint('');
+          }}
+          placeholder="用户名"
+          placeholderTextColor={th.text3}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="username"
+          textContentType="username"
+          style={[s.input, { backgroundColor: th.bgSoft, borderColor: th.borderSoft, color: th.text }]}
+        />
 
         <TextInput
           value={password}
@@ -201,28 +187,47 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
             setPassword(v);
             if (hint) setHint('');
           }}
-          placeholder={mode === 'legacy' ? '访问口令' : '密码'}
+          placeholder="密码"
           placeholderTextColor={th.text3}
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry
+          textContentType={isRegister ? 'newPassword' : 'password'}
           style={[s.input, { backgroundColor: th.bgSoft, borderColor: th.borderSoft, color: th.text }]}
         />
 
-        {mode === 'setup' ? (
-          <TextInput
-            value={invite}
-            onChangeText={(v) => {
-              setInvite(v);
-              if (hint) setHint('');
-            }}
-            placeholder="邀请码（服务器访问口令）"
-            placeholderTextColor={th.text3}
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry
-            style={[s.input, { backgroundColor: th.bgSoft, borderColor: th.borderSoft, color: th.text }]}
-          />
+        {isRegister ? (
+          <>
+            <TextInput
+              value={password2}
+              onChangeText={(v) => {
+                setPassword2(v);
+                if (hint) setHint('');
+              }}
+              placeholder="再输一次密码"
+              placeholderTextColor={th.text3}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+              textContentType="newPassword"
+              style={[s.input, { backgroundColor: th.bgSoft, borderColor: th.borderSoft, color: th.text }]}
+            />
+            {inviteRequired ? (
+              <TextInput
+                value={invite}
+                onChangeText={(v) => {
+                  setInvite(v);
+                  if (hint) setHint('');
+                }}
+                placeholder="邀请码"
+                placeholderTextColor={th.text3}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                style={[s.input, { backgroundColor: th.bgSoft, borderColor: th.borderSoft, color: th.text }]}
+              />
+            ) : null}
+          </>
         ) : null}
 
         {hint ? <Text style={[s.hint, { color: th.bad }]}>{hint}</Text> : null}
@@ -240,33 +245,34 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
             <ActivityIndicator color={th.accentInk} size="small" />
           ) : (
             <Text style={[s.primaryText, { color: th.accentInk }]}>
-              {mode === 'setup' ? '创建并进入' : '登录'}
+              {isRegister ? '创建并进入' : '登录'}
             </Text>
           )}
         </Pressable>
 
         <View style={s.links}>
-          {mode === 'login' ? (
-            <Pressable onPress={() => { setMode('legacy'); setHint(''); setPassword(''); }}>
-              <Text style={[s.link, { color: th.text3 }]}>只有访问口令？点这里</Text>
+          {registrationEnabled ? (
+            <Pressable
+              onPress={() => {
+                setMode(isRegister ? 'login' : 'register');
+                setHint('');
+                setPassword('');
+                setPassword2('');
+              }}
+            >
+              <Text style={[s.link, { color: th.text2 }]}>
+                {isRegister ? '已经有账号，去登录' : '第一次用？创建账号'}
+              </Text>
             </Pressable>
           ) : null}
-          {mode === 'legacy' ? (
-            <Pressable onPress={() => { setMode('login'); setHint(''); setPassword(''); }}>
-              <Text style={[s.link, { color: th.text3 }]}>返回账号登录</Text>
-            </Pressable>
-          ) : null}
-          {mode === 'setup' ? (
-            <Pressable onPress={() => { setMode('login'); setHint(''); }}>
-              <Text style={[s.link, { color: th.text3 }]}>已经有账号了</Text>
-            </Pressable>
-          ) : null}
-          {mode === 'login' ? (
-            <Pressable onPress={boot}>
-              <Text style={[s.link, { color: th.text3 }]}>重试连接</Text>
-            </Pressable>
-          ) : null}
+          <Pressable onPress={boot}>
+            <Text style={[s.link, { color: th.text3 }]}>连不上？重试</Text>
+          </Pressable>
         </View>
+
+        <Text style={[s.foot, { color: th.text3 }]}>
+          训练与恢复数据仅用于生成训练建议，不替代医生诊断。
+        </Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -276,7 +282,7 @@ const useStyles = makeStyles((t: Theme) => ({
   full: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   checkingText: { marginTop: S.md, fontSize: T.caption },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: S.xl, width: '100%', maxWidth: 420 },
-  brand: { fontSize: T.caption, letterSpacing: 2, opacity: 0.5, marginBottom: S.lg },
+  brand: { fontSize: T.caption, letterSpacing: 2, marginBottom: S.lg },
   title: { fontSize: T.title + 4, fontWeight: '700', letterSpacing: -0.5, marginBottom: S.sm },
   desc: { fontSize: T.body2, lineHeight: 21, marginBottom: S.lg },
   input: {
@@ -298,4 +304,5 @@ const useStyles = makeStyles((t: Theme) => ({
   primaryText: { fontSize: T.body + 1, fontWeight: '600' },
   links: { marginTop: S.lg, gap: S.sm, alignItems: 'center' },
   link: { fontSize: T.caption },
+  foot: { fontSize: T.micro, lineHeight: 18, marginTop: S.xl, textAlign: 'center' },
 }));

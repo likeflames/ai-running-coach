@@ -6,14 +6,13 @@ import {
   TextInput,
   Pressable,
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
+  Dimensions,
   ActivityIndicator,
   Keyboard,
   Animated,
   Easing,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { api, chatStream, ChatEvent } from '../../../src/api';
 import { Markdown } from '../../../src/markdown';
 import { Glass } from '../../../src/glass';
@@ -52,21 +51,46 @@ const TOOL_LABELS: Record<string, string> = {
 export default function ChatScreen() {
   const t = useTheme();
   const s = useStyles();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
-  // 键盘弹起时输入栏贴着键盘，平时要让开底部的系统标签栏
-  const [kbd, setKbd] = React.useState(false);
+  /*
+   * 键盘避让不能靠 KeyboardAvoidingView 的 padding：
+   * 这个页面在 iOS 原生标签栏（UITabBarController）里，KAV 拿到的 frame
+   * 和键盘坐标系对不上，算出来的 padding 偏小，输入栏就被键盘盖住了。
+   *
+   * 改成自己算：量出本页容器在屏幕上的底边，再拿键盘顶边一减，
+   * 差值就是真正被盖住的高度。标签栏占掉的部分会被自动扣掉，
+   * 键盘弹起/收起/切换输入法都走同一个公式。
+   */
+  const rootRef = React.useRef<React.ComponentRef<typeof View>>(null);
+  const bottomRef = React.useRef(0);
+  const [kbInset, setKbInset] = React.useState(0);
+
+  const measureBottom = React.useCallback(() => {
+    const node = rootRef.current as unknown as {
+      measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+    } | null;
+    node?.measureInWindow?.((_x, y, _w, h) => {
+      if (h > 0) bottomRef.current = y + h;
+    });
+  }, []);
+
   React.useEffect(() => {
-    const a = Keyboard.addListener('keyboardWillShow', () => {
-      setKbd(true);
-      // 键盘把列表压矮后底部内容会被裁掉，跟着贴一次底
+    const apply = (screenY: number) => {
+      const bottom = bottomRef.current || Dimensions.get('window').height;
+      setKbInset(Math.max(0, bottom - screenY));
       follow.current = true;
       setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 80);
-    });
-    const b = Keyboard.addListener('keyboardWillHide', () => setKbd(false));
+    };
+    const a = Keyboard.addListener('keyboardWillChangeFrame', (e) => apply(e.endCoordinates.screenY));
+    const b = Keyboard.addListener('keyboardWillHide', () => setKbInset(0));
+    // 安卓只有 did 事件
+    const c = Keyboard.addListener('keyboardDidShow', (e) => apply(e.endCoordinates.screenY));
+    const d = Keyboard.addListener('keyboardDidHide', () => setKbInset(0));
     return () => {
       a.remove();
       b.remove();
+      c.remove();
+      d.remove();
     };
   }, []);
   const [msgs, setMsgs] = React.useState<Msg[]>([]);
@@ -153,7 +177,7 @@ export default function ChatScreen() {
         d.phase = 'answering';
         d.tool = '';
       } else if (ev.t === 'tool') {
-        d.tool = TOOL_LABELS[ev.d || ''] || `正在调用 ${ev.d}…`;
+        d.tool = TOOL_LABELS[ev.d || ''] || '正在查你的数据…';
       } else if (ev.t === 'error') {
         d.text += `\n\n❌ ${ev.d || '出错了'}`;
         d.phase = 'error';
@@ -254,10 +278,10 @@ export default function ChatScreen() {
   );
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: t.bg }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={0}
+    <View
+      ref={rootRef}
+      onLayout={measureBottom}
+      style={{ flex: 1, backgroundColor: t.bg, paddingBottom: kbInset }}
     >
       <FlatList
         ref={listRef}
@@ -310,29 +334,10 @@ export default function ChatScreen() {
         }}
         ListHeaderComponent={
           <View>
-            {meta ? (
-              <Pressable onPress={() => router.push('/model-config')} style={s.modelRow}>
-                <Text
-                  style={[s.modelText, !meta.configured && { color: t.bad }]}
-                  numberOfLines={1}
-                >
-                  {meta.configured
-                    ? `${meta.provider_label} · ${meta.model}${
-                        meta.key_source === 'self' ? ' · 我的 Key' : ''
-                      }`
-                    : '还没配置模型，点这里填一个'}
-                  {meta.configured ? '　' : '　'}
-                  {meta.configured ? (
-                    <>
-                      今日 {meta.calls} 次 ·{' '}
-                      {meta.tokens >= 10000
-                        ? `${(meta.tokens / 10000).toFixed(1)} 万`
-                        : meta.tokens}{' '}
-                      tokens
-                    </>
-                  ) : null}
-                </Text>
-              </Pressable>
+            {meta && !meta.configured ? (
+              <Text style={[s.modelText, { color: t.warn }]}>
+                教练服务暂时不可用，稍后再试
+              </Text>
             ) : null}
             {thinkingMsgs.length > 0 ? (
               <Pressable
@@ -372,10 +377,10 @@ export default function ChatScreen() {
       />
 
       {/*
-        insets.bottom 在系统标签栏里已经包含了「标签栏 + Home 指示条」的高度，
-        所以只要让它贴着安全区底边，输入栏就正好落在悬浮标签栏的上面，不再额外加数。
+        kbInset 已经把「键盘盖住的高度」算进去了（见文件顶部的说明）。
+        键盘在时只留一点呼吸，收起时让开系统标签栏。
       */}
-      <Glass style={[s.inputBar, { marginBottom: kbd ? 6 : insets.bottom + 8 }]}>
+      <Glass style={[s.inputBar, { marginBottom: kbInset > 0 ? 8 : insets.bottom + 8 }]}>
         <TextInput
           style={s.input}
           value={input}
@@ -392,7 +397,7 @@ export default function ChatScreen() {
           <Text style={{ color: t.accentInk, fontWeight: '600', fontSize: T.body }}>{busy ? '…' : '发送'}</Text>
         </Pressable>
       </Glass>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

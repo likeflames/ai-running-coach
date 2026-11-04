@@ -19,8 +19,44 @@ let accessToken = '';
 /** 服务器说口令不对时，回调让 UI 弹出输入框，返回新口令（取消则 null） */
 let askTokenHandler: (() => Promise<string | null>) | null = null;
 
+/**
+ * 会话代际。登录/退出都 +1。
+ *
+ * 为什么需要它：切账号时上一个账号的请求可能还在路上（尤其是 30 秒的流式对话），
+ * 回来以后如果直接 setState，新账号的界面就会显示旧账号的数据。
+ * 所有异步回调在落地前都比一次代际，不一致就丢弃。
+ */
+let generation = 0;
+
+export class SessionChangedError extends Error {
+  constructor() {
+    super('登录状态已变化');
+    this.name = 'SessionChangedError';
+  }
+}
+
+export function getSessionGeneration() {
+  return generation;
+}
+
+/** token 里带 uid（v2.<uid>.<ver>.<exp>.<sig>），拿不到就返回 anonymous */
+export function getSessionId(): string {
+  const parts = (accessToken || '').split('.');
+  if (parts.length >= 5 && parts[0] === 'v2') return parts[1];
+  return 'anonymous';
+}
+
+export function isSessionCurrent(g: number) {
+  return g === generation;
+}
+
 export function getAccessToken() {
   return accessToken;
+}
+
+/** 当前实际连通的服务器地址，给「配置快捷指令」这类需要完整 URL 的地方用 */
+export function getApiBase() {
+  return activeBase || API_CANDIDATES[0];
 }
 
 /** UI 层注册「请用户输入口令」的处理函数 */
@@ -29,9 +65,13 @@ export function registerTokenPrompt(fn: (() => Promise<string | null>) | null) {
 }
 
 export async function setAccessToken(t: string) {
-  accessToken = t.trim();
+  const next = t.trim();
+  const changed = next !== accessToken;
+  accessToken = next;
+  if (changed) generation += 1;
   try {
-    await AsyncStorage.setItem(STORAGE_TOKEN_KEY, accessToken);
+    if (next) await AsyncStorage.setItem(STORAGE_TOKEN_KEY, next);
+    else await AsyncStorage.removeItem(STORAGE_TOKEN_KEY);
   } catch {
     /* ignore */
   }
@@ -44,8 +84,36 @@ export function registerLogoutHandler(fn: (() => void) | null) {
   logoutHandler = fn;
 }
 
-/** 清掉本地凭据并回到登录页。服务器那边 token 是无状态的，删本地就够了。 */
+/** 清掉本账号的本地缓存（建议正文、提醒设置等），换账号时不带走 */
+async function clearLocalCaches() {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const mine = keys.filter(
+      (k) => k.startsWith('rc.advice.') || k.startsWith('rc.reminders.') || k === 'rc.reminder'
+    );
+    if (mine.length) await AsyncStorage.multiRemove(mine);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 退出登录：先让服务器把 token 作废（auth_version +1，别的设备也一起掉线），
+ * 再清本地。服务器连不上也照样本地退出，不能把人卡在登录态里。
+ */
 export async function logout() {
+  const token = accessToken;
+  if (token) {
+    try {
+      await fetch(`${activeBase || API_CANDIDATES[0]}/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'X-RC-Token': token },
+      });
+    } catch {
+      /* 离线也要能退 */
+    }
+  }
+  await clearLocalCaches();
   await setAccessToken('');
   logoutHandler?.();
 }
@@ -189,6 +257,7 @@ async function request<T = any>(
   promptOn401 = true
 ): Promise<T> {
   await ready;
+  const gen = generation;
   const bases = orderedBases();
 
   // 多个候选地址并行发，谁先成功用谁（避免逐个超时干等）
@@ -202,25 +271,19 @@ async function request<T = any>(
       if (settled) return;
       settled = true;
 
+      // 请求发出后用户换了账号：旧结果一律丢弃，不能显示到新账号界面上
+      if (!isSessionCurrent(gen)) return reject(new SessionChangedError());
+
       if (bizFail) {
-        // 口令不对：请用户输入一次，然后重试
-        if (bizFail.status === 401 && !retried && askTokenHandler && promptOn401) {
-          askTokenHandler()
-            .then((t) => {
-              if (!t) return reject(new Error('需要访问口令，请在设置里填写'));
-              return setAccessToken(t).then(() => request<T>(path, options, timeoutMs, true)).then(resolve, reject);
-            })
-            .catch(reject);
-          return;
+        if (bizFail.status === 401 && promptOn401) {
+          // 密码登录没有「再输一次口令」这条路，直接回登录页
+          setAccessToken('').finally(() => logoutHandler?.());
+          return reject(new Error('登录已失效，请重新登录'));
         }
         return reject(bizFail.error);
       }
 
-      reject(
-        new Error(
-          `连不上服务器\n${notes.join('\n')}\n\n手机能上网的话，多半是服务器正在重启（改配置后会有十几秒空档），稍等再点「重试」。`
-        )
-      );
+      reject(new Error('连不上服务器，检查网络后再试'));
     };
 
     bases.forEach((base) => {
@@ -233,6 +296,7 @@ async function request<T = any>(
           if (r.ok) {
             if (settled) return;
             settled = true;
+            if (!isSessionCurrent(gen)) return reject(new SessionChangedError());
             if (activeBase !== base) {
               activeBase = base;
               AsyncStorage.setItem(STORAGE_KEY, base).catch(() => {});
@@ -467,23 +531,24 @@ export async function adviceStream(
   retried = false
 ): Promise<void> {
   await ready;
+  const gen = generation;
   const bases = orderedBases();
   const path = fresh ? '/api/daily-advice/stream?fresh=1' : '/api/daily-advice/stream';
   let lastError: Error | null = null;
 
   for (const base of bases) {
+    if (!isSessionCurrent(gen)) throw new SessionChangedError();
     try {
-      await sseOnce(base, path, null, onEvent, 180000);
+      await sseOnce(base, path, null, (ev) => {
+        if (isSessionCurrent(gen)) onEvent(ev);
+      }, 180000);
       return;
     } catch (e: any) {
       if (e?.started) throw e;
-      if (e?.status === 401 && askTokenHandler && !retried) {
-        const t = await askTokenHandler();
-        if (t) {
-          await setAccessToken(t);
-          return adviceStream(onEvent, fresh, true);
-        }
-        throw new Error('需要访问口令，请在设置里填写');
+      if (e?.status === 401) {
+        await setAccessToken('');
+        logoutHandler?.();
+        throw new Error('登录已失效，请重新登录');
       }
       lastError = new Error(e?.message || '网络错误');
     }
@@ -503,23 +568,24 @@ export async function chatStream(
   retried = false
 ): Promise<void> {
   await ready;
+  const gen = generation;
   const bases = orderedBases();
   let lastError: Error | null = null;
 
   for (const base of bases) {
+    if (!isSessionCurrent(gen)) throw new SessionChangedError();
     try {
-      await streamOnce(base, message, history, onEvent);
+      await streamOnce(base, message, history, (ev) => {
+        if (isSessionCurrent(gen)) onEvent(ev);
+      });
       return;
     } catch (e: any) {
       if (e?.started) throw e;
-      // 口令不对：输入一次后整体重来
-      if (e?.status === 401 && askTokenHandler && !retried) {
-        const t = await askTokenHandler();
-        if (t) {
-          await setAccessToken(t);
-          return chatStream(message, history, onEvent, true);
-        }
-        throw new Error('需要访问口令，请在设置里填写');
+      // 切了账号就不再重试：旧对话不能带着新账号的 token 再发一次
+      if (e?.status === 401) {
+        await setAccessToken('');
+        logoutHandler?.();
+        throw new Error('登录已失效，请重新登录');
       }
       lastError = new Error(e?.message || '网络错误');
     }

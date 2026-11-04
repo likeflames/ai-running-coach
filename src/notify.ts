@@ -14,11 +14,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { api } from './api';
+import { api, getSessionId } from './api';
 
-const KEY_ENABLED = 'reminder_enabled';
-const KEY_HOUR = 'reminder_hour';
-const KEY_MINUTE = 'reminder_minute';
+/**
+ * 提醒设置按账号分开存。
+ * 以前是一份全局设置，换账号后上一个人的提醒还在，还会用新账号的课表重排 —— 两头都错。
+ */
+function keyOf(base: string) {
+  return `rc.reminders.${getSessionId()}.${base}`;
+}
+const KEY_ENABLED = () => keyOf('enabled');
+const KEY_HOUR = () => keyOf('hour');
+const KEY_MINUTE = () => keyOf('minute');
 
 export const DEFAULT_HOUR = 7;
 export const DEFAULT_MINUTE = 20;
@@ -34,9 +41,9 @@ export type ReminderSettings = {
 export async function getReminderSettings(): Promise<ReminderSettings> {
   try {
     const [en, h, m] = await Promise.all([
-      AsyncStorage.getItem(KEY_ENABLED),
-      AsyncStorage.getItem(KEY_HOUR),
-      AsyncStorage.getItem(KEY_MINUTE),
+      AsyncStorage.getItem(KEY_ENABLED()),
+      AsyncStorage.getItem(KEY_HOUR()),
+      AsyncStorage.getItem(KEY_MINUTE()),
     ]);
     return {
       enabled: en === '1',
@@ -50,9 +57,9 @@ export async function getReminderSettings(): Promise<ReminderSettings> {
 
 async function saveSettings(s: ReminderSettings) {
   await AsyncStorage.multiSet([
-    [KEY_ENABLED, s.enabled ? '1' : '0'],
-    [KEY_HOUR, String(s.hour)],
-    [KEY_MINUTE, String(s.minute)],
+    [KEY_ENABLED(), s.enabled ? '1' : '0'],
+    [KEY_HOUR(), String(s.hour)],
+    [KEY_MINUTE(), String(s.minute)],
   ]);
 }
 

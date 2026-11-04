@@ -1,53 +1,22 @@
 import React from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator, Switch, Pressable, Animated, Easing } from 'react-native';
+import { View, Text, Pressable, Animated, Easing, ActivityIndicator } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import * as DocumentPicker from 'expo-document-picker';
-import { api, adviceStream, authApi, logout, StatusResp, RecentActivity } from '../../../src/api';
+import {
+  api,
+  adviceStream,
+  getSessionId,
+  getSessionGeneration,
+  isSessionCurrent,
+  StatusResp,
+  RecentActivity,
+} from '../../../src/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Markdown } from '../../../src/markdown';
-import {
-  Screen,
-  Card,
-  Section,
-  Stat,
-  Btn,
-  Loading,
-  ErrorBox,
-  Empty,
-  Pill,
-  List,
-  ListRow,
-  Segmented,
-  ColorDots,
-  Divider,
-  Progress,
-} from '../../../src/ui';
-import {
-  S,
-  T,
-  TNUM,
-  ACCENTS,
-  ACCENT_LIST,
-  alpha,
-  levelColor,
-  tsbColor,
-  recoveryColor,
-  type Theme,
-  type Appearance,
-  type AccentId,
-} from '../../../src/theme';
-import { makeStyles, useTheme, useThemeControl } from '../../../src/theme-provider';
+import { Screen, Card, Section, Stat, Btn, Loading, ErrorBox, Empty, Pill, List, Divider, Progress } from '../../../src/ui';
+import { S, T, TNUM, levelColor, tsbColor, recoveryColor, type Theme } from '../../../src/theme';
+import { makeStyles, useTheme } from '../../../src/theme-provider';
 import { F } from '../../../src/format';
 import { ACTIVITY_TYPE, zh } from '../../../src/labels';
-import { getReminderSettings, setReminderEnabled, ReminderSettings } from '../../../src/notify';
-
-/** 提醒时间预设：够用就好，省得引一个日期选择器 */
-const TIME_PRESETS = [
-  { h: 6, m: 30, label: '6:30' },
-  { h: 7, m: 0, label: '7:00' },
-  { h: 7, m: 30, label: '7:30' },
-  { h: 8, m: 0, label: '8:00' },
-];
 
 export default function TodayScreen() {
   const t = useTheme();
@@ -57,76 +26,43 @@ export default function TodayScreen() {
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
-  const [syncing, setSyncing] = React.useState<string | null>(null);
   const [advice, setAdvice] = React.useState<string | null>(null);
   const [adviceLoading, setAdviceLoading] = React.useState(false);
-  /** 单独存错误：之前是把错误串写进 advice，界面以为"已经有内容"，
-   *  于是永远不显示「重试」按钮，失败一次就卡住 */
   const [adviceErr, setAdviceErr] = React.useState<string | null>(null);
-  const [rem, setRem] = React.useState<ReminderSettings>({ enabled: false, hour: 7, minute: 20 });
-  const [remBusy, setRemBusy] = React.useState(false);
-  /** 当前登录的是谁（只用来在「账号」里显示，不参与业务） */
-  const [me, setMe] = React.useState<{ username?: string; display_name?: string; legacy?: boolean } | null>(null);
+  const [adviceThink, setAdviceThink] = React.useState(0);
 
-  React.useEffect(() => {
-    getReminderSettings().then(setRem);
-  }, []);
+  const adviceBuf = React.useRef('');
+  const advicePush = React.useRef(0);
+  const adviceProg = React.useRef(new Animated.Value(0)).current;
 
-  const toggleReminder = async (on: boolean) => {
-    setRemBusy(true);
-    try {
-      const r: any = await setReminderEnabled(on, rem.hour, rem.minute);
-      if (!r.ok) {
-        setRem({ ...rem, enabled: false });
-        Alert.alert(
-          '没有通知权限',
-          '请到 iPhone「设置 → 通知 → AI跑步教练」里允许通知，再回来打开开关。'
-        );
-        return;
-      }
-      setRem({ ...rem, enabled: on });
-      if (on && r.scheduled) {
-        Alert.alert('已开启', `未来 ${r.scheduled} 天的提醒都排好了。\n每周打开一次 App 会自动往后补。`);
-      }
-    } catch (e: any) {
-      Alert.alert('设置失败', e?.message || '未知错误');
-    } finally {
-      setRemBusy(false);
-    }
-  };
-
-  const pickTime = async (h: number, m: number) => {
-    const next = { ...rem, hour: h, minute: m };
-    setRem(next);
-    if (next.enabled) {
-      setRemBusy(true);
-      try {
-        await setReminderEnabled(true, h, m);
-      } finally {
-        setRemBusy(false);
-      }
-    }
-  };
+  /** 缓存按账号隔离：换账号不能看到上一个人今天的建议 */
+  const adviceKey = React.useMemo(
+    () => `rc.advice.${getSessionId()}.${new Date().toISOString().slice(0, 10)}`,
+    []
+  );
 
   const load = React.useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
+    const gen = getSessionGeneration();
     try {
       const d = await api.get<StatusResp>('/api/status');
+      if (!isSessionCurrent(gen)) return;
       setData(d);
       setErr(null);
     } catch (e: any) {
+      if (!isSessionCurrent(gen)) return;
       if (!quiet) setErr(e?.message || '加载失败');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isSessionCurrent(gen)) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
-  // 回到首页时静默刷新一次：在数据源页同步完切回来，训练和恢复数据要立刻是新的
   const firstFocus = React.useRef(true);
   useFocusEffect(
     React.useCallback(() => {
-      authApi.me().then(setMe).catch(() => {});
       if (firstFocus.current) {
         firstFocus.current = false;
         load();
@@ -136,59 +72,6 @@ export default function TodayScreen() {
     }, [load])
   );
 
-  const onLogout = () => {
-    Alert.alert('退出登录', '退出后需要重新输入用户名和密码。本地不会删除任何训练数据。', [
-      { text: '取消', style: 'cancel' },
-      { text: '退出', style: 'destructive', onPress: () => logout() },
-    ]);
-  };
-
-  const onSync = async (all = false) => {
-    setSyncing(all ? '全量' : '增量');
-    try {
-      await api.post(all ? '/api/sync-all' : '/api/sync', {}, 300000);
-      await load(true);
-      Alert.alert('同步完成', all ? '已拉取全部历史数据' : '已同步最新训练与恢复数据');
-    } catch (e: any) {
-      Alert.alert('同步失败', e?.message || '未知错误');
-    } finally {
-      setSyncing(null);
-    }
-  };
-
-  const onUpload = async () => {
-    try {
-      const res = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-      if (res.canceled || !res.assets?.length) return;
-      const file = res.assets[0];
-      setSyncing('上传');
-      const out = await api.upload('/api/upload-fit', file.uri, file.name, 'application/octet-stream');
-      if (out?.success) {
-        Alert.alert(
-          '解析成功',
-          `${out.activity?.distance_km ?? '-'} 公里 · ${out.activity?.avg_pace ?? '-'} · 心率 ${out.activity?.avg_hr ?? '-'}`
-        );
-        await load(true);
-      } else {
-        Alert.alert('解析失败', out?.error || '未知错误');
-      }
-    } catch (e: any) {
-      Alert.alert('上传失败', e?.message || '未知错误');
-    } finally {
-      setSyncing(null);
-    }
-  };
-
-  const adviceKey = React.useMemo(() => `rc.advice.${new Date().toISOString().slice(0, 10)}`, []);
-  /** 流式累积用 ref，避免每个 token 都触发整页重渲染 */
-  const adviceBuf = React.useRef('');
-  const advicePush = React.useRef(0);
-  /** 模型的思考字数：正文出来前用来告诉用户"还在思考"，而不是干等 */
-  const [adviceThink, setAdviceThink] = React.useState(0);
-  /** 估算进度条：模型给不出真实百分比，按预计耗时长到 92%，完成时补满 */
-  const adviceProg = React.useRef(new Animated.Value(0)).current;
-
-  /** 打开时先显示今天已经生成过的那份，不用每次都等 40 秒 */
   React.useEffect(() => {
     AsyncStorage.getItem(adviceKey)
       .then((v) => {
@@ -197,14 +80,9 @@ export default function TodayScreen() {
       .catch(() => {});
   }, [adviceKey]);
 
-  /**
-   * 生成今日建议。
-   *
-   * 后端生成一次要 30–40 秒（实测 38.7s），一次性请求必然被超时打断，
-   * 所以改成 SSE 流式：文字一段段出现，等待感完全不同。
-   */
   const loadAdvice = async (fresh = false) => {
     if (adviceLoading) return;
+    const gen = getSessionGeneration();
     setAdviceLoading(true);
     setAdviceErr(null);
     setAdvice('');
@@ -212,8 +90,6 @@ export default function TodayScreen() {
     advicePush.current = 0;
     setAdviceThink(0);
 
-    // 进度条先动起来。75 秒到 92%，剩下的等真正完成时再补 —— 宁可在 92% 待久一点，
-    // 也不要卡在 99% 假装快好了。
     adviceProg.setValue(0.05);
     Animated.timing(adviceProg, {
       toValue: 0.92,
@@ -227,6 +103,7 @@ export default function TodayScreen() {
     let reported = 0;
     try {
       await adviceStream((ev) => {
+        if (!isSessionCurrent(gen)) return;
         if (ev.t === 'content') {
           adviceBuf.current += ev.d || '';
           const now = Date.now();
@@ -235,7 +112,6 @@ export default function TodayScreen() {
             setAdvice(adviceBuf.current);
           }
         } else if (ev.t === 'reasoning') {
-          // 思考阶段正文还是空的，只报个字数，让人知道没卡住
           think += (ev.d || '').length;
           if (!adviceBuf.current && think - reported > 120) {
             reported = think;
@@ -246,30 +122,33 @@ export default function TodayScreen() {
         }
       }, fresh);
 
+      if (!isSessionCurrent(gen)) return;
       const text = adviceBuf.current;
       if (failed) {
         setAdvice('');
         setAdviceErr(failed);
       } else if (!text.trim()) {
         setAdvice('');
-        setAdviceErr('模型这次没有返回内容，再试一次');
+        setAdviceErr('这次没有返回内容，再试一次');
       } else {
         setAdvice(text);
         AsyncStorage.setItem(adviceKey, text).catch(() => {});
       }
     } catch (e: any) {
+      if (!isSessionCurrent(gen)) return;
       const partial = adviceBuf.current;
       if (partial.trim()) {
-        // 已经显示了一部分：保留，并提示可能不完整
         setAdvice(partial);
-        setAdviceErr('输出中断：' + (e?.message || '连接断开'));
+        setAdviceErr('输出中断，可以重新生成');
       } else {
         setAdvice('');
-        setAdviceErr(e?.message || '未知错误');
+        setAdviceErr(e?.message || '生成失败');
       }
     } finally {
-      Animated.timing(adviceProg, { toValue: 1, duration: 260, useNativeDriver: false }).start();
-      setAdviceLoading(false);
+      if (isSessionCurrent(gen)) {
+        Animated.timing(adviceProg, { toValue: 1, duration: 260, useNativeDriver: false }).start();
+        setAdviceLoading(false);
+      }
     }
   };
 
@@ -287,15 +166,35 @@ export default function TodayScreen() {
   const fit = data.fitness || ({} as any);
   const sleepScore = Number(rec.sleep_score) || 0;
   const recColor = recoveryColor(t, sleepScore);
-  const remKey = `${rem.hour}:${rem.minute}`;
+  const hasAnyData = !!(rec.date || data.recent_activities?.length);
 
   return (
     <Screen refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }}>
+      <View style={s.topRow}>
+        <Text style={[s.pageTitle, { color: t.text }]}>今天</Text>
+        <Pressable onPress={() => router.push('/settings')} hitSlop={12} style={s.gear}>
+          <Text style={[s.gearText, { color: t.text2 }]}>⚙</Text>
+        </Pressable>
+      </View>
+
+      {!hasAnyData ? (
+        <Card>
+          <Text style={[s.emptyTitle, { color: t.text }]}>先把数据接上</Text>
+          <Text style={[s.emptyBody, { color: t.text2 }]}>
+            完善个人资料、连接佳明或 Oura，之后这里会显示每天的恢复状态和训练建议。
+          </Text>
+          <View style={{ height: S.md }} />
+          <Btn title="完善个人资料" onPress={() => router.push('/profile')} primary />
+          <View style={{ height: S.sm }} />
+          <Btn title="连接数据源" onPress={() => router.push('/sources')} />
+        </Card>
+      ) : null}
+
       {/* ---------- 恢复 ---------- */}
       <Card>
         <View style={s.cardTop}>
-          <Text style={s.eyebrow}>睡眠评分</Text>
-          <Text style={s.cardDate}>{rec.date || F.today()}</Text>
+          <Text style={[s.eyebrow, { color: t.text2 }]}>睡眠评分</Text>
+          <Text style={[s.cardDate, { color: t.text3 }]}>{rec.date || F.today()}</Text>
         </View>
 
         <View style={s.heroRow}>
@@ -343,16 +242,14 @@ export default function TodayScreen() {
               <View style={s.sleepBar}>
                 {(() => {
                   const parts = [
-                    { v: rec.deep_minutes || 0, c: '#5E5CE6' },   // 深睡
-                    { v: rec.light_minutes || 0, c: '#64D2FF' },  // 浅睡
-                    { v: rec.rem_minutes || 0, c: '#BF5AF2' },    // REM
-                    { v: rec.awake_minutes || 0, c: t.text3 },    // 清醒
+                    { v: rec.deep_minutes || 0, c: '#5E5CE6' },
+                    { v: rec.light_minutes || 0, c: '#64D2FF' },
+                    { v: rec.rem_minutes || 0, c: '#BF5AF2' },
+                    { v: rec.awake_minutes || 0, c: t.text3 },
                   ];
                   const total = parts.reduce((a, b) => a + b.v, 0) || 1;
                   return parts.map((p, i) =>
-                    p.v > 0 ? (
-                      <View key={i} style={{ flex: p.v / total, backgroundColor: p.c }} />
-                    ) : null
+                    p.v > 0 ? <View key={i} style={{ flex: p.v / total, backgroundColor: p.c }} /> : null
                   );
                 })()}
               </View>
@@ -363,10 +260,9 @@ export default function TodayScreen() {
                 <Stat label="清醒" value={rec.awake_minutes ?? null} unit="分" />
               </View>
               {rec.sleep_efficiency ? (
-                <Text style={[s.adviceFoot, { marginTop: S.sm }]}>
+                <Text style={[s.foot, { color: t.text3 }]}>
                   睡眠效率 {F.num(rec.sleep_efficiency, 0)}%
                   {rec.sleep_latency_min ? ` · 入睡耗时 ${rec.sleep_latency_min} 分` : ''}
-                  {rec.source ? ` · 数据来自 ${rec.source}` : ''}
                 </Text>
               ) : null}
             </View>
@@ -374,52 +270,105 @@ export default function TodayScreen() {
         </View>
       </Card>
 
-      {/* ---------- 今日建议 ---------- */}
-      <Card tint={adv.level ? levelColor(t, adv.level) : undefined}>
-        <View style={s.cardTop}>
-          <Text style={s.eyebrow}>今日建议</Text>
-          {adv.level ? (
-            <Pill text={['休息', '轻松', '按计划', '可加量'][adv.level - 1] || ''} color={levelColor(t, adv.level)} />
-          ) : null}
-        </View>
-        <Text style={[s.adviceText, { color: levelColor(t, adv.level) }]}>{adv.advice || '-'}</Text>
-        {adv.reason ? <Text style={s.adviceReason}>{adv.reason}</Text> : null}
-        {adv.hrv_normal_range ? (
-          <Text style={s.adviceFoot}>
-            心率变异周均 {F.num(adv.hrv_week_avg, 1)}（正常 {adv.hrv_normal_range[0]}–{adv.hrv_normal_range[1]}，偏离 {F.num(adv.z_score, 2)}）
-          </Text>
-        ) : null}
-      </Card>
+      {/* ---------- 今日建议（规则版） ---------- */}
+      {adv.advice ? (
+        <Card tint={adv.level ? levelColor(t, adv.level) : undefined}>
+          <View style={s.cardTop}>
+            <Text style={[s.eyebrow, { color: t.text2 }]}>今天怎么练</Text>
+            {adv.level ? (
+              <Pill text={['休息', '轻松', '按计划', '可加量'][adv.level - 1] || ''} color={levelColor(t, adv.level)} />
+            ) : null}
+          </View>
+          <Text style={[s.adviceText, { color: levelColor(t, adv.level) }]}>{adv.advice}</Text>
+          {adv.reason ? <Text style={[s.adviceReason, { color: t.text2 }]}>{adv.reason}</Text> : null}
+        </Card>
+      ) : null}
 
       {/* ---------- 体能状态 ---------- */}
-      <Card>
-        <View style={s.cardTop}>
-          <Text style={s.eyebrow}>体能状态</Text>
-          <Pill text={fit.status || '-'} color={tsbColor(t, fit.tsb || 0)} />
-        </View>
-        <View style={[s.statRow, { marginTop: S.sm }]}>
-          <Stat label="体能储备" value={F.num(fit.ctl, 1)} />
-          <Stat label="近期疲劳" value={F.num(fit.atl, 1)} />
-          <Stat label="当前状态" value={F.num(fit.tsb, 1)} color={tsbColor(t, fit.tsb || 0)} />
-        </View>
-        <View style={[s.statRow, { marginTop: S.md }]}>
-          <Stat label="本周跑量" value={F.num(fit.weekly_km, 1)} unit="公里" />
-          <Stat
-            label="负荷比"
-            value={F.num(fit.acwr_ratio, 2)}
-            color={fit.acwr_ratio > 1.5 ? t.bad : fit.acwr_ratio > 1.3 ? t.warn : t.good}
-          />
-          <View style={{ flex: 1, minWidth: 70 }} />
-        </View>
-      </Card>
+      {hasAnyData ? (
+        <Card>
+          <View style={s.cardTop}>
+            <Text style={[s.eyebrow, { color: t.text2 }]}>体能状态</Text>
+            <Pill text={fit.status || '-'} color={tsbColor(t, fit.tsb || 0)} />
+          </View>
+          <View style={[s.statRow, { marginTop: S.sm }]}>
+            <Stat label="体能储备" value={F.num(fit.ctl, 1)} />
+            <Stat label="近期疲劳" value={F.num(fit.atl, 1)} />
+            <Stat label="当前状态" value={F.num(fit.tsb, 1)} color={tsbColor(t, fit.tsb || 0)} />
+          </View>
+          <View style={[s.statRow, { marginTop: S.md }]}>
+            <Stat label="本周跑量" value={F.num(fit.weekly_km, 1)} unit="公里" />
+            <Stat
+              label="负荷比"
+              value={F.num(fit.acwr_ratio, 2)}
+              color={fit.acwr_ratio > 1.5 ? t.bad : fit.acwr_ratio > 1.3 ? t.warn : t.good}
+            />
+            <View style={{ flex: 1, minWidth: 70 }} />
+          </View>
+        </Card>
+      ) : null}
+
+      {/* ---------- AI 建议 ---------- */}
+      {hasAnyData ? (
+        <Section title="教练建议">
+          <Card>
+            {advice ? (
+              <>
+                <Markdown text={advice} />
+                {adviceLoading ? (
+                  <View style={{ marginTop: S.md }}>
+                    <Progress value={adviceProg} height={4} />
+                    <Text style={[s.regen, { color: t.accent, marginTop: S.sm }]}>正在生成…</Text>
+                  </View>
+                ) : null}
+                {adviceErr ? <Text style={[s.errBody, { color: t.text3, marginTop: S.sm }]}>{adviceErr}</Text> : null}
+                {!adviceLoading ? (
+                  <Pressable onPress={() => loadAdvice(true)} hitSlop={10} style={{ marginTop: S.md }}>
+                    <Text style={[s.regen, { color: t.accent }]}>重新生成</Text>
+                  </Pressable>
+                ) : null}
+              </>
+            ) : adviceLoading ? (
+              <View style={{ paddingVertical: S.md }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.sm, marginBottom: S.md }}>
+                  <ActivityIndicator size="small" color={t.accent} />
+                  <Text style={[s.regen, { color: t.accent }]}>
+                    {adviceThink > 0 ? `教练正在思考（已 ${adviceThink} 字）` : '正在读取数据…'}
+                  </Text>
+                </View>
+                <Progress value={adviceProg} height={5} />
+              </View>
+            ) : adviceErr ? (
+              <View>
+                <Text style={[s.errTitle, { color: t.text }]}>这次没拿到建议</Text>
+                <Text style={[s.errBody, { color: t.text3 }]}>{adviceErr}</Text>
+                <View style={{ marginTop: S.md }}>
+                  <Btn title="重试" onPress={() => loadAdvice()} primary />
+                </View>
+              </View>
+            ) : (
+              <View>
+                <Text style={[s.hint, { color: t.text2 }]}>
+                  结合你的恢复数据和最近训练，生成今天该怎么练。
+                </Text>
+                <View style={{ marginTop: S.md }}>
+                  <Btn title="生成今日建议" onPress={() => loadAdvice()} primary />
+                </View>
+              </View>
+            )}
+          </Card>
+        </Section>
+      ) : null}
 
       {/* ---------- 最近训练 ---------- */}
       <Section
         title="最近训练"
         right={
-          <Pressable onPress={() => router.push('/activities')} hitSlop={8}>
-            <Text style={[s.link, { color: t.accent }]}>全部</Text>
-          </Pressable>
+          data.recent_activities?.length ? (
+            <Pressable onPress={() => router.push('/activities')} hitSlop={8}>
+              <Text style={[s.link, { color: t.accent }]}>全部</Text>
+            </Pressable>
+          ) : null
         }
       >
         {data.recent_activities?.length ? (
@@ -429,225 +378,50 @@ export default function TodayScreen() {
             ))}
           </List>
         ) : (
-          <Empty text="暂无训练记录，上传 .fit 文件或同步佳明" />
+          <Empty text="还没有训练记录，去「我的 → 数据源」连一个" />
         )}
       </Section>
-
-      {/* ---------- 设置 ---------- */}
-      <Section title="设置">
-        <List>
-          <View style={s.blockRow}>
-            <Text style={s.blockLabel}>外观</Text>
-            <View style={{ marginTop: S.sm }}>
-              <AppearancePicker />
-            </View>
-          </View>
-
-          <View style={s.blockRow}>
-            <Text style={s.blockLabel}>强调色</Text>
-            <View style={{ marginTop: S.sm }}>
-              <AccentPicker />
-            </View>
-          </View>
-
-          <ListRow
-            title="每日提醒"
-            sub="早上提醒今天练什么"
-            right={
-              remBusy ? (
-                <ActivityIndicator color={t.text2} />
-              ) : (
-                <Switch
-                  value={rem.enabled}
-                  onValueChange={toggleReminder}
-                  trackColor={{ false: t.cardInner, true: t.good }}
-                />
-              )
-            }
-          />
-
-          {rem.enabled ? (
-            <View style={s.blockRow}>
-              <Text style={s.blockLabel}>提醒时间</Text>
-              <View style={{ marginTop: S.sm }}>
-                <Segmented
-                  options={TIME_PRESETS.map((p) => ({ value: `${p.h}:${p.m}`, label: p.label }))}
-                  value={remKey}
-                  onChange={(v) => {
-                    const [h, m] = v.split(':').map(Number);
-                    pickTime(h, m);
-                  }}
-                />
-              </View>
-            </View>
-          ) : null}
-        </List>
-      </Section>
-
-      {/* ---------- 账号 ---------- */}
-      <Section title="账号">
-        <List>
-          <ListRow
-            title={me?.display_name || '当前账号'}
-            sub={
-              me?.username
-                ? `@${me.username} · 数据只有你自己能看到`
-                : me?.legacy
-                  ? '用访问口令登录 · 建议改成账号密码'
-                  : '加载中…'
-            }
-          />
-          <ListRow title="退出登录" onPress={onLogout} chevron />
-        </List>
-      </Section>
-
-      {/* ---------- 数据 ---------- */}
-      <Section title="数据">
-        <List>
-          <ListRow
-            title="数据源"
-            sub="佳明 / Oura，可同时连多个"
-            onPress={() => router.push('/sources')}
-            chevron
-          />
-          <ListRow
-            title="模型"
-            sub="用自己的 API Key 跑对话，费用算自己的"
-            onPress={() => router.push('/model-config')}
-            chevron
-          />
-          <ListRow
-            title={syncing === '增量' ? '同步中…' : '同步佳明'}
-            onPress={() => onSync(false)}
-            chevron
-          />
-          <ListRow
-            title={syncing === '全量' ? '拉取中…' : '拉取全部历史'}
-            onPress={() => onSync(true)}
-            chevron
-          />
-          <ListRow
-            title={syncing === '上传' ? '解析中…' : '上传 .fit 文件'}
-            onPress={onUpload}
-            chevron
-          />
-        </List>
-      </Section>
-
-      {/* ---------- AI 建议正文 ---------- */}
-      <Section title="AI 今日训练建议">
-        <Card>
-          {advice ? (
-            <>
-              <Markdown text={advice} />
-              {adviceLoading ? (
-                <View style={{ marginTop: S.md }}>
-                  <Progress value={adviceProg} height={4} />
-                  <Text style={[s.adviceRegen, { marginTop: S.sm }]}>正在生成…</Text>
-                </View>
-              ) : null}
-              {adviceErr ? <Text style={[s.adviceErrBody, { marginTop: S.sm }]}>{adviceErr}</Text> : null}
-              {!adviceLoading ? (
-                <Pressable onPress={() => loadAdvice(true)} hitSlop={10} style={{ marginTop: S.md }}>
-                  <Text style={s.adviceRegen}>重新生成</Text>
-                </Pressable>
-              ) : null}
-            </>
-          ) : adviceLoading ? (
-            <View style={{ paddingVertical: S.md }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.sm, marginBottom: S.md }}>
-                <ActivityIndicator size="small" color={t.accent} />
-                <Text style={s.adviceRegen}>
-                  {adviceThink > 0 ? `教练正在思考（已 ${adviceThink} 字）` : '正在读取数据…'}
-                </Text>
-              </View>
-              <Progress value={adviceProg} height={5} />
-              <Text style={[s.adviceHint, { marginTop: S.md }]}>想完会一段段写出来，不用一直盯着</Text>
-            </View>
-          ) : adviceErr ? (
-            <View style={{ alignItems: 'flex-start' }}>
-              <Text style={s.adviceErrTitle}>这次没拿到建议</Text>
-              <Text style={s.adviceErrBody}>{adviceErr}</Text>
-              <View style={{ marginTop: S.md, alignSelf: 'stretch' }}>
-                <Btn title="重试" onPress={() => loadAdvice()} primary />
-              </View>
-            </View>
-          ) : (
-            <View style={{ alignItems: 'flex-start' }}>
-              <Text style={s.adviceHint}>结合恢复数据、体能与计划，生成今天该怎么练</Text>
-              <View style={{ marginTop: S.md, alignSelf: 'stretch' }}>
-                <Btn title="生成今日建议" onPress={() => loadAdvice()} primary />
-              </View>
-            </View>
-          )}
-        </Card>
-      </Section>
     </Screen>
-  );
-}
-
-/* ---------- 外观（跟随系统 / 浅色 / 深色） ---------- */
-function AppearancePicker() {
-  const { appearance, setAppearance } = useThemeControl();
-  return (
-    <Segmented<Appearance>
-      options={[
-        { value: 'system', label: '跟随系统' },
-        { value: 'light', label: '浅色' },
-        { value: 'dark', label: '深色' },
-      ]}
-      value={appearance}
-      onChange={setAppearance}
-    />
-  );
-}
-
-/* ---------- 强调色 ---------- */
-function AccentPicker() {
-  const t = useTheme();
-  const { accent, setAccent } = useThemeControl();
-  return (
-    <ColorDots
-      colors={ACCENT_LIST.map((id) => ({ id, color: t.dark ? ACCENTS[id].dark : ACCENTS[id].light }))}
-      value={accent}
-      onChange={(id) => setAccent(id as AccentId)}
-    />
   );
 }
 
 function ActivityRow({ a }: { a: RecentActivity }) {
   const s = useStyles();
   const t = useTheme();
-  const paceColor = a.avg_pace ? t.text : t.text2;
   return (
     <View style={s.actRow}>
       <View style={{ flex: 1, paddingRight: S.sm }}>
-        <Text style={s.actTitle}>
+        <Text style={[s.actTitle, { color: t.text }]}>
           {F.dayShort(a.date)} · {zh(ACTIVITY_TYPE, a.type, '运动')}
         </Text>
-        <Text style={s.actMeta}>
-          {F.num(a.distance_km, 2)} 公里 · <Text style={{ color: paceColor }}>{a.avg_pace || '–'}</Text> · 心率{' '}
-          {F.num(a.avg_hr)}
+        <Text style={[s.actMeta, { color: t.text2 }]}>
+          {F.num(a.distance_km, 2)} 公里 · {a.avg_pace || '–'} · 心率 {F.num(a.avg_hr)}
         </Text>
       </View>
-      {a.notes ? (
-        <Text style={s.actNotes} numberOfLines={1}>
-          {a.notes}
-        </Text>
-      ) : null}
     </View>
   );
 }
 
 const useStyles = makeStyles((t: Theme) => ({
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: S.md,
+    paddingTop: S.sm,
+  },
+  pageTitle: { fontSize: T.title + 8, fontWeight: '700', letterSpacing: -0.8 },
+  gear: { padding: 6 },
+  gearText: { fontSize: 22 },
+
   cardTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: S.sm,
   },
-  eyebrow: { color: t.text2, fontSize: T.caption },
-  cardDate: { color: t.text3, fontSize: T.caption, ...TNUM },
+  eyebrow: { fontSize: T.caption },
+  cardDate: { fontSize: T.caption, ...TNUM },
 
   heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: S.sm },
   heroNum: { fontSize: T.hero, fontWeight: '600', letterSpacing: -2, ...TNUM, lineHeight: 54 },
@@ -655,23 +429,19 @@ const useStyles = makeStyles((t: Theme) => ({
   track: { height: 8, borderRadius: 5, overflow: 'hidden', marginTop: S.xs },
 
   statRow: { flexDirection: 'row', gap: S.sm },
-  /** 睡眠分期的堆叠条：宽度按各阶段时长占比分配 */
   sleepBar: { flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden' },
 
   adviceText: { fontSize: 22, fontWeight: '600', letterSpacing: -0.5, lineHeight: 30 },
-  adviceReason: { color: t.text2, fontSize: T.body2, lineHeight: 21, marginTop: S.sm - 2 },
-  adviceFoot: { color: t.text3, fontSize: T.micro, marginTop: S.sm, lineHeight: 17 },
-  adviceBody: { color: t.text, fontSize: T.body2, lineHeight: 24 },
-  adviceStreaming: { flexDirection: 'row', alignItems: 'center', gap: S.sm, marginTop: S.md },
-  adviceHint: { color: t.text2, fontSize: T.body2, lineHeight: 21 },
-  adviceRegen: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
-  adviceErrTitle: { color: t.text, fontSize: T.body2, fontWeight: '600', marginBottom: 4 },
-  adviceErrBody: { color: t.text3, fontSize: T.caption, lineHeight: 19 },
+  adviceReason: { fontSize: T.body2, lineHeight: 21, marginTop: S.sm - 2 },
+  foot: { fontSize: T.micro, marginTop: S.sm, lineHeight: 17 },
+  hint: { fontSize: T.body2, lineHeight: 21 },
+  regen: { fontSize: T.caption, fontWeight: '500' },
+  errTitle: { fontSize: T.body2, fontWeight: '600', marginBottom: 4 },
+  errBody: { fontSize: T.caption, lineHeight: 19 },
+  link: { fontSize: T.body },
 
-  link: { fontSize: T.body, fontWeight: '400' },
-
-  blockRow: { paddingHorizontal: S.md, paddingVertical: 12 },
-  blockLabel: { color: t.text, fontSize: T.body, letterSpacing: -0.2 },
+  emptyTitle: { fontSize: T.title, fontWeight: '600', marginBottom: 6 },
+  emptyBody: { fontSize: T.body2, lineHeight: 21 },
 
   actRow: {
     flexDirection: 'row',
@@ -680,7 +450,6 @@ const useStyles = makeStyles((t: Theme) => ({
     paddingVertical: 11,
     minHeight: 56,
   },
-  actTitle: { color: t.text, fontSize: T.body, letterSpacing: -0.2 },
-  actMeta: { color: t.text2, fontSize: T.caption, marginTop: 3, ...TNUM },
-  actNotes: { color: t.text3, fontSize: T.micro, maxWidth: 110, textAlign: 'right' },
+  actTitle: { fontSize: T.body, letterSpacing: -0.2 },
+  actMeta: { fontSize: T.caption, marginTop: 3, ...TNUM },
 }));
