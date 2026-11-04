@@ -15,10 +15,11 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSAppTransportSecurity": {
-          "NSAllowsLocalNetworking": true
-        },
-        "NSLocalNetworkUsageDescription": "用于在局域网内直连家里电脑上的训练数据服务"
+    "NSAppTransportSecurity": {
+      "NSAllowsArbitraryLoads": true,
+      "NSAllowsLocalNetworking": true
+    },
+    "NSLocalNetworkUsageDescription": "用于连接你的训练数据服务器，同步跑步与健康数据"
       }
     },
     "android": {

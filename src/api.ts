@@ -46,10 +46,15 @@ async function rawRequest<T>(
     return { ok: true, data: (await res.json()) as T };
   } catch (e: any) {
     const aborted = e?.name === 'AbortError';
+    const detail = e?.message ? `（${e.message}）` : '';
     return {
       ok: false,
       network: true,
-      error: new Error(aborted ? '请求超时，请检查服务是否运行' : e?.message || '网络错误'),
+      error: new Error(
+        aborted
+          ? '服务器响应太慢，请稍后重试'
+          : `连不上服务器${detail}\n请确认手机网络正常，然后点「重试」`
+      ),
     };
   } finally {
     clearTimeout(timer);
