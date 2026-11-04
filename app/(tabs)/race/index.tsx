@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { useRouter } from 'expo-router';
 import { api } from '../../../src/api';
-import { Screen, Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat, Pill, Hint } from '../../../src/ui';
+import { Screen, Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat, Pill, Hint, Btn } from '../../../src/ui';
 import { Legend, LineChart } from '../../../src/charts';
 import { S, T, R, TNUM, alpha, tsbColor, type Theme } from '../../../src/theme';
 import { makeStyles, useTheme } from '../../../src/theme-provider';
@@ -23,6 +24,7 @@ const STRATEGIES = [
 export default function RaceScreen() {
   const t = useTheme();
   const s = useStyles();
+  const router = useRouter();
   const [distance, setDistance] = React.useState(21.1);
   const [strategy, setStrategy] = React.useState('even');
   const [pacing, setPacing] = React.useState<any>(null);
@@ -83,6 +85,19 @@ export default function RaceScreen() {
         <ErrorBox message={err} onRetry={load} />
       ) : (
         <>
+          {/* 新用户没填 5 公里成绩时，后端只回一句「缺资料」。
+              与其显示「暂无配速数据」让人以为是坏了，不如直接给个入口。 */}
+          {pacing?.needs_profile || nutrition?.needs_profile ? (
+            <Card>
+              <CardHead title="还差一步" />
+              <Text style={s.meta}>
+                {pacing?.reason || nutrition?.reason || '先把个人资料填完整，才能算出配速和补给'}
+              </Text>
+              <View style={{ height: S.md }} />
+              <Btn title="去完善资料" onPress={() => router.push('/profile')} primary small />
+            </Card>
+          ) : null}
+
           {/* 目标配速 */}
           {pacing?.available ? (
             <Card>
