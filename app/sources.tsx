@@ -36,6 +36,9 @@ const CAP: Record<string, string> = {
   push: '推送课表',
 };
 
+/** Oura 没有撤销授权的接口，换账号只能让浏览器先登出（清掉登录 cookie） */
+const OURA_SIGN_OUT = 'https://cloud.ouraring.com/user/sign-out';
+
 export default function SourcesScreen() {
   const t = useTheme();
   const s = useStyles();
@@ -128,9 +131,42 @@ export default function SourcesScreen() {
     ]);
   };
 
+  /**
+   * 切换 Oura 账号：先断开本地连接，再把浏览器带到 Oura 登出页。
+   *
+   * 为什么必须登出：Oura 的授权页会记住浏览器里的登录状态，已授权过的应用
+   * 再点「去授权」会直接跳回同一个账号，根本没有换账号的机会。
+   * Oura 没有 token 撤销端点，authorize 也没有 prompt=consent 之类的参数，
+   * 所以只能在浏览器侧先登出。
+   */
+  const switchAccount = (src: SourceInfo) => {
+    Alert.alert(
+      '切换 Oura 账号',
+      '会先断开当前连接，然后在浏览器里打开 Oura 登出页。\n\n登出后回到这里，点「去授权」用另一个账号登录。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '继续',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(src.id);
+            try {
+              await api.post(`/api/sources/${src.id}/disconnect`, {});
+              await load(true);
+              await Linking.openURL(OURA_SIGN_OUT);
+            } catch (e: any) {
+              Alert.alert('操作失败', e?.message || '未知错误');
+            } finally {
+              setBusy(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const toggleCred = async (src: SourceInfo) => {
-    if (editing === src.id) {
-      setEditing(null);
+    if (editing === src.id) {      setEditing(null);
       return;
     }
     setBusy(src.id);
@@ -251,6 +287,14 @@ export default function SourcesScreen() {
               disabled={busy === src.id}
               small
             />
+            {src.id === 'oura' ? (
+              <Btn
+                title="切换账号"
+                onPress={() => switchAccount(src)}
+                disabled={busy === src.id}
+                small
+              />
+            ) : null}
           </View>
 
           {editing === src.id ? (
@@ -324,7 +368,7 @@ const useStyles = makeStyles((t: Theme) => ({
   capText: { fontSize: T.micro, fontWeight: '500' },
   note: { color: t.text3, fontSize: T.micro, lineHeight: 18, marginTop: S.sm },
   meta: { color: t.text3, fontSize: T.micro, marginTop: 6 },
-  actions: { flexDirection: 'row', gap: S.sm, marginTop: S.md },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: S.sm, marginTop: S.md },
   credForm: { marginTop: S.md, paddingTop: S.md, borderTopWidth: 0.5, borderTopColor: t.border },
   credNote: { color: t.text3, fontSize: T.micro, lineHeight: 18, marginTop: S.xs },
 }));
