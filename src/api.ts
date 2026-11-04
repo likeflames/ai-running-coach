@@ -4,11 +4,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CANDIDATES } from './config';
 
-const DEFAULT_TIMEOUT = 20000;
-const PROBE_TIMEOUT = 6000;
+const DEFAULT_TIMEOUT = 30000;
+const PROBE_TIMEOUT = 15000;
 const STORAGE_KEY = 'apiBase';
 
 let activeBase: string | null = null;
+/** 某些机型上 fetch 走不通但 XHR 可以，记下来优先用 XHR */
+let preferXhr = false;
 
 const ready: Promise<void> = (async () => {
   try {
@@ -24,11 +26,10 @@ function orderedBases(): string[] {
   return [activeBase, ...API_CANDIDATES.filter((b) => b !== activeBase)];
 }
 
-async function rawRequest<T>(
-  url: string,
-  options: RequestInit,
-  timeoutMs: number
-): Promise<{ ok: true; data: T } | { ok: false; network: boolean; error: Error }> {
+type Result<T> = { ok: true; data: T } | { ok: false; network: boolean; error: Error };
+
+/** 通道一：标准 fetch */
+async function fetchOnce<T>(url: string, options: RequestInit, timeoutMs: number): Promise<Result<T>> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -40,49 +41,140 @@ async function rawRequest<T>(
       } catch {
         /* ignore */
       }
-      // 服务器有响应（即使报错）说明地址是对的，不再切换
       return { ok: false, network: false, error: new Error(`HTTP ${res.status} ${detail}`.trim()) };
     }
     return { ok: true, data: (await res.json()) as T };
   } catch (e: any) {
-    const aborted = e?.name === 'AbortError';
-    const detail = e?.message ? `（${e.message}）` : '';
-    return {
-      ok: false,
-      network: true,
-      error: new Error(
-        aborted
-          ? '服务器响应太慢，请稍后重试'
-          : `连不上服务器${detail}\n请确认手机网络正常，然后点「重试」`
-      ),
-    };
+    const msg = String(e?.message || e || '');
+    const aborted = e?.name === 'AbortError' || /abort|cancel/i.test(msg);
+    return { ok: false, network: true, error: new Error(aborted ? '超时无响应' : msg || '连接失败') };
   } finally {
     clearTimeout(timer);
   }
 }
 
+/** 通道二：XHR（和 Safari 更接近的一层，fetch 被系统拦时通常还能用） */
+function xhrOnce<T>(url: string, options: RequestInit, timeoutMs: number): Promise<Result<T>> {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    let done = false;
+    const finish = (v: Result<T>) => {
+      if (done) return;
+      done = true;
+      resolve(v);
+    };
+    // 兜底：XHR 自身不回调时强制结束
+    const guard = setTimeout(() => finish({ ok: false, network: true, error: new Error('超时无响应') }), timeoutMs + 3000);
+
+    try {
+      xhr.open((options.method as string) || 'GET', url, true);
+      const hdrs = (options.headers as Record<string, string>) || {};
+      Object.keys(hdrs).forEach((k) => xhr.setRequestHeader(k, String(hdrs[k])));
+      xhr.timeout = timeoutMs;
+      xhr.onload = () => {
+        clearTimeout(guard);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          let data: any = null;
+          try {
+            data = JSON.parse(xhr.responseText);
+          } catch {
+            data = null;
+          }
+          finish({ ok: true, data });
+        } else {
+          let detail = '';
+          try {
+            detail = JSON.parse(xhr.responseText).detail || '';
+          } catch {
+            /* ignore */
+          }
+          finish({ ok: false, network: false, error: new Error(`HTTP ${xhr.status} ${detail}`.trim()) });
+        }
+      };
+      xhr.onerror = () => {
+        clearTimeout(guard);
+        finish({ ok: false, network: true, error: new Error('XHR 连接失败') });
+      };
+      xhr.ontimeout = () => {
+        clearTimeout(guard);
+        finish({ ok: false, network: true, error: new Error('XHR 超时无响应') });
+      };
+      xhr.onabort = () => {
+        clearTimeout(guard);
+        finish({ ok: false, network: true, error: new Error('XHR 被中断') });
+      };
+      xhr.send((options.body as any) ?? null);
+    } catch (e: any) {
+      clearTimeout(guard);
+      finish({ ok: false, network: true, error: new Error('XHR 异常 ' + (e?.message || '')) });
+    }
+  });
+}
+
+async function rawRequest<T>(url: string, options: RequestInit, timeoutMs: number): Promise<Result<T>> {
+  if (preferXhr) return xhrOnce<T>(url, options, timeoutMs);
+
+  const r = await fetchOnce<T>(url, options, timeoutMs);
+  if (r.ok || !r.network) return r; // 成功，或服务器已响应（业务错误）
+
+  // fetch 通道失败：换 XHR 再试一次
+  const alt = await xhrOnce<T>(url, options, timeoutMs);
+  if (alt.ok || !alt.network) {
+    preferXhr = true; // 记住：这台设备用 XHR 才通
+    return alt;
+  }
+  return {
+    ok: false,
+    network: true,
+    error: new Error(`fetch → ${r.error.message}；XHR → ${alt.error.message}`),
+  };
+}
+
 async function request<T = any>(path: string, options: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
   await ready;
   const bases = orderedBases();
-  let lastError: Error = new Error('无法连接服务器');
 
-  for (let i = 0; i < bases.length; i++) {
-    const base = bases[i];
-    const isActive = base === activeBase;
-    const timeout = isActive ? timeoutMs : Math.min(timeoutMs, PROBE_TIMEOUT);
-    const r = await rawRequest<T>(`${base}${path}`, options, timeout);
+  // 多个候选地址并行发，谁先成功用谁（避免逐个超时干等）
+  return new Promise<T>((resolve, reject) => {
+    let pending = bases.length;
+    let bizError: Error | null = null;
+    const notes: string[] = [];
 
-    if (r.ok) {
-      if (activeBase !== base) {
-        activeBase = base;
-        AsyncStorage.setItem(STORAGE_KEY, base).catch(() => {});
-      }
-      return r.data;
-    }
-    if (!r.network) throw r.error; // 服务器已响应，直接抛出业务错误
-    lastError = r.error;
-  }
-  throw lastError;
+    bases.forEach((base) => {
+      const isActive = base === activeBase;
+      const timeout = isActive ? timeoutMs : Math.min(timeoutMs, PROBE_TIMEOUT);
+      const started = Date.now();
+
+      rawRequest<T>(`${base}${path}`, options, timeout)
+        .then((r) => {
+          if (r.ok) {
+            if (activeBase !== base) {
+              activeBase = base;
+              AsyncStorage.setItem(STORAGE_KEY, base).catch(() => {});
+            }
+            resolve(r.data);
+            return;
+          }
+          if (!r.network) {
+            // 服务器有响应（业务错误），记下来备用
+            if (!bizError) bizError = r.error;
+          } else {
+            const secs = ((Date.now() - started) / 1000).toFixed(1);
+            notes.push(`${base.replace(/^https?:\/\//, '')}：${r.error.message}（${secs}s）`);
+          }
+          if (--pending === 0) {
+            if (bizError) reject(bizError);
+            else reject(new Error(`连不上服务器\n${notes.join('\n')}\n请确认手机能正常上网，然后点「重试」`));
+          }
+        })
+        .catch((e) => {
+          if (--pending === 0) {
+            if (bizError) reject(bizError);
+            else reject(new Error(`连不上服务器\n${notes.join('\n')}\n请确认手机能正常上网，然后点「重试」`));
+          }
+        });
+    });
+  });
 }
 
 function qs(params: Record<string, string | number | undefined>) {
