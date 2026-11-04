@@ -13,31 +13,43 @@ concurrency:
 
 jobs:
   build:
-    # 机器池选择说明（踩过的坑）：
-    # - macos-14 只有 Xcode 15.4 / iOS SDK 17.5，RN 0.88 + Expo 58 需要 Xcode 16+，编译必失败；
-    # - macos-15 的池子长期排队，实测 30 分钟拿不到机器；
-    # - macos-26 是 arm64 池，容量紧但能拿到，Xcode 26 完整支持。
-    # 因此固定 macos-26；拿不到机器时用 workflow_dispatch 重试即可。
-    runs-on: macos-26
+    # 机器池选择（踩过的坑，别随便改）：
+    #
+    # - macos-15 是标准池，基本 1 分钟内就能拿到机器。它同时预装了 Xcode 16.x 和
+    #   Xcode 26.x，但默认指向 Xcode_16.4（Swift 6.1）。而 RN 0.88 自带的
+    #   ReactNativeDependencies 里的 Swift 包要求 swift-tools 6.2，
+    #   所以「直接 build」会报 `package 'apple' is using Swift tools version 6.2.0
+    #   but the installed version is 6.1.0`。下面显式切到 Xcode 26 即可。
+    # - macos-26 池子自带 Xcode 26，但容量极紧：经常排队 20 分钟后直接判定
+    #   「job was not acquired by Runner of type hosted」，白等一场。
+    runs-on: macos-15
     timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show toolchain
+      - name: Select Xcode 26
         run: |
           set -euo pipefail
+          APP=$(ls -d /Applications/Xcode_26.*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$APP" ]; then
+            echo "::error::这台机器上没有 Xcode 26，换机器池"
+            ls -1 /Applications | grep -i xcode || true
+            exit 1
+          fi
+          echo "使用 $APP"
+          sudo xcode-select -s "$APP"
           xcodebuild -version
           SDK=$(xcrun --sdk iphoneos --show-sdk-version)
           echo "iOS SDK: $SDK"
-          node --version
-          # RN 0.88 / Expo 58 需要 Xcode 16 及以上；SDK 版本过低直接失败，避免出现一堆看不懂的编译错误
           MAJOR=${SDK%%.*}
           if [ "$MAJOR" -lt 18 ]; then
-            echo "::error::iOS SDK $SDK 过低（需要 18+）。当前机器池不对，请换 runs-on。"
+            echo "::error::iOS SDK $SDK 过低（需要 18+），Xcode 没切成功"
             exit 1
           fi
+          swift --version
+          node --version
 
       - name: Setup Node
         uses: actions/setup-node@v4
