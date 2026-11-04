@@ -44,3 +44,6 @@ yarn-error.*
 token.txt
 qr_*.png
 扫码连接.html
+
+# 构建产物
+dist-ipa/
