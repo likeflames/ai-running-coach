@@ -109,44 +109,14 @@ export default function ChatScreen() {
   const touching = React.useRef(false);
 
   const listRef = React.useRef<FlatList<Msg>>(null);
-  const [meta, setMeta] = React.useState<{
-    provider: string;
-    provider_label: string;
-    model: string;
-    key_source: string;
-    configured: boolean;
-    calls: number;
-    tokens: number;
-  } | null>(null);
+  /** 只关心一件事：教练服务现在能不能用。服务商、模型名、token 用量都是运维视角，不该出现在对话页 */
+  const [available, setAvailable] = React.useState(true);
 
-  // 顶部那行小字：当前模型 + 今天实际消耗的 token（后端每次调用都记账）
-  // 模型配置是活的，所以每次回到这个页面都重新取一次，用户刚在设置里换完模型能立刻看到
   const loadMeta = React.useCallback(() => {
-    Promise.all([
-      api
-        .get<{
-          provider: string;
-          provider_label?: string;
-          model: string;
-          key_source?: string;
-          configured?: boolean;
-        }>('/api/chat/model')
-        .catch(() => null),
-      api
-        .get<{ today_usage: { calls: number; total_tokens: number } }>('/api/chat/usage')
-        .catch(() => null),
-    ]).then(([m, u]) => {
-      if (!m) return;
-      setMeta({
-        provider: m.provider,
-        provider_label: m.provider_label || m.provider,
-        model: m.model,
-        key_source: m.key_source || 'none',
-        configured: m.configured !== false,
-        calls: u?.today_usage?.calls || 0,
-        tokens: u?.today_usage?.total_tokens || 0,
-      });
-    });
+    api
+      .get<{ configured?: boolean }>('/api/chat/model')
+      .then((m) => setAvailable(m?.configured !== false))
+      .catch(() => {});
   }, []);
 
   useFocusEffect(
@@ -334,7 +304,7 @@ export default function ChatScreen() {
         }}
         ListHeaderComponent={
           <View>
-            {meta && !meta.configured ? (
+            {!available ? (
               <Text style={[s.modelText, { color: t.warn }]}>
                 教练服务暂时不可用，稍后再试
               </Text>
