@@ -15,7 +15,7 @@ jobs:
   build:
     # macos-26 是 arm64，容量紧的时候会长时间排不上队。
     # 换到 macos-15：同为 Xcode 16，但属于另一个机器池，排队情况通常好一些。
-    runs-on: macos-15
+    runs-on: macos-14
     timeout-minutes: 60
 
     steps:
