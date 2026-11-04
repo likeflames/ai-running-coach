@@ -1,0 +1,215 @@
+import React from 'react';
+import { View, Text, Alert, Linking, ActivityIndicator } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { api } from '../src/api';
+import { Screen, Card, Loading, ErrorBox, Pill, Btn, Hint } from '../src/ui';
+import { S, T, type Theme } from '../src/theme';
+import { makeStyles, useTheme } from '../src/theme-provider';
+
+interface SourceInfo {
+  id: string;
+  name: string;
+  subtitle: string;
+  provides: string[];
+  auth: string;
+  docs: string;
+  note: string;
+  configured: boolean;
+  connected: boolean;
+  account: string;
+  last_sync_at: string | null;
+  last_error: string;
+}
+
+const CAP: Record<string, string> = {
+  recovery: '恢复',
+  activity: '训练',
+  push: '推送课表',
+};
+
+export default function SourcesScreen() {
+  const t = useTheme();
+  const s = useStyles();
+  const [items, setItems] = React.useState<SourceInfo[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const d = await api.get<{ sources: SourceInfo[] }>('/api/sources');
+      setItems(d.sources || []);
+      setErr(null);
+    } catch (e: any) {
+      setErr(e?.message || '加载失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 从 Safari 授权回来页面会重新获得焦点，这时自动刷新状态
+  useFocusEffect(
+    React.useCallback(() => {
+      load(true);
+    }, [load])
+  );
+
+  const connect = async (src: SourceInfo) => {
+    setBusy(src.id);
+    try {
+      const r = await api.post<{ url?: string; connected?: boolean }>(`/api/sources/${src.id}/connect`, {});
+      if (r?.url) {
+        await Linking.openURL(r.url);
+        Alert.alert(
+          '在 Safari 里完成授权',
+          `授权成功后回到这里，${src.name} 就会显示「已连接」，再点「同步」拉数据。`
+        );
+      } else {
+        await load(true);
+      }
+    } catch (e: any) {
+      Alert.alert('连接失败', e?.message || '未知错误');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const sync = async (src: SourceInfo) => {
+    setBusy(src.id);
+    try {
+      const r = await api.post<any>(`/api/sources/${src.id}/sync?days=14`, {}, 120000);
+      const rec = r?.recovery?.recovery_days ?? 0;
+      const act = r?.activity?.activities;
+      Alert.alert(
+        '同步完成',
+        `${src.name}：更新 ${rec} 天恢复数据${act != null ? `，新增 ${act} 条训练` : ''}。`
+      );
+      await load(true);
+    } catch (e: any) {
+      Alert.alert('同步失败', e?.message || '未知错误');
+      await load(true);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const disconnect = (src: SourceInfo) => {
+    Alert.alert('断开连接', `断开 ${src.name} 后，已同步的数据会保留，但不再自动更新。`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '断开',
+        style: 'destructive',
+        onPress: async () => {
+          setBusy(src.id);
+          try {
+            await api.post(`/api/sources/${src.id}/disconnect`, {});
+            await load(true);
+          } catch (e: any) {
+            Alert.alert('操作失败', e?.message || '未知错误');
+          } finally {
+            setBusy(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  if (loading) return <Loading />;
+  if (err)
+    return (
+      <Screen noTabBar>
+        <ErrorBox message={err} onRetry={() => load()} />
+      </Screen>
+    );
+
+  return (
+    <Screen noTabBar>
+      <Text style={s.hint}>
+        数据源负责把「身体恢复」和「跑了什么」喂给教练。可以同时连多个，互补合并，不会互相覆盖。
+      </Text>
+
+      {items.map((src) => (
+        <Card key={src.id} style={{ marginBottom: S.md }}>
+          <View style={s.head}>
+            <View style={{ flex: 1 }}>
+              <View style={s.titleRow}>
+                <Text style={s.name}>{src.name}</Text>
+                <Pill
+                  text={src.connected ? '已连接' : src.configured ? '未连接' : '未配置'}
+                  color={src.connected ? t.good : src.configured ? t.text3 : t.warn}
+                />
+              </View>
+              <Text style={s.sub}>{src.subtitle}</Text>
+            </View>
+            {busy === src.id ? <ActivityIndicator color={t.text3} /> : null}
+          </View>
+
+          <View style={s.caps}>
+            {src.provides.map((p) => (
+              <View key={p} style={[s.cap, { backgroundColor: t.cardInner }]}>
+                <Text style={[s.capText, { color: t.text2 }]}>{CAP[p] || p}</Text>
+              </View>
+            ))}
+          </View>
+
+          <Text style={s.note}>{src.note}</Text>
+
+          {src.connected ? (
+            <Text style={s.meta}>
+              {src.account ? `${src.account} · ` : ''}
+              {src.last_sync_at ? `上次同步 ${src.last_sync_at.slice(5, 16).replace('T', ' ')}` : '还没有同步过'}
+            </Text>
+          ) : null}
+
+          {src.last_error ? <Text style={[s.meta, { color: t.bad }]}>{src.last_error}</Text> : null}
+
+          <View style={s.actions}>
+            {!src.connected ? (
+              <Btn
+                title={src.configured ? (src.auth === 'oauth' ? '去授权' : '连接') : '服务器未配置'}
+                onPress={() => connect(src)}
+                disabled={!src.configured || busy === src.id}
+                primary
+                small
+              />
+            ) : (
+              <>
+                <Btn title="同步" onPress={() => sync(src)} disabled={busy === src.id} primary small />
+                <Btn title="断开" onPress={() => disconnect(src)} disabled={busy === src.id} small />
+              </>
+            )}
+          </View>
+        </Card>
+      ))}
+
+      <Hint label="为什么 Oura 不能当主数据源？">
+        Oura 戒指没有 GPS，只能给出睡眠、HRV、准备度和「运动时长」，跑步的距离是手机在旁边时估出来的，
+        经常是空的，更没有每公里配速。所以用它补恢复数据很准，跑量还得靠佳明或 Strava。
+        {'\n\n'}
+        Strava 是跑步数据的事实标准（距离、配速、心率、分段、轨迹都有），
+        但 2026 年起 Strava 要求开发者账号本身是付费订阅用户才能创建 API 应用，
+        且默认只能授权自己一个账号（10 人以内无需审核）。
+      </Hint>
+
+      <Hint label="多人共用的前提">
+        现在整套数据库是单人的。要让别人也能用（各自的数据互不可见），
+        需要先做「账号 + 按用户隔离数据库」，这是下一步的活。
+      </Hint>
+    </Screen>
+  );
+}
+
+const useStyles = makeStyles((t: Theme) => ({
+  hint: { color: t.text3, fontSize: T.caption, lineHeight: 20, marginBottom: S.md },
+  head: { flexDirection: 'row', alignItems: 'center' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  name: { color: t.text, fontSize: T.body + 1, fontWeight: '600', letterSpacing: -0.2 },
+  sub: { color: t.text3, fontSize: T.caption, marginTop: 3 },
+  caps: { flexDirection: 'row', gap: 6, marginTop: S.sm },
+  cap: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  capText: { fontSize: T.micro, fontWeight: '500' },
+  note: { color: t.text3, fontSize: T.micro, lineHeight: 18, marginTop: S.sm },
+  meta: { color: t.text3, fontSize: T.micro, marginTop: 6 },
+  actions: { flexDirection: 'row', gap: S.sm, marginTop: S.md },
+}));

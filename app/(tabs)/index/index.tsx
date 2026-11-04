@@ -434,6 +434,12 @@ export default function TodayScreen() {
       <Section title="数据">
         <List>
           <ListRow
+            title="数据源"
+            sub="佳明 / Oura / Strava，可同时连多个"
+            onPress={() => router.push('/sources')}
+            chevron
+          />
+          <ListRow
             title={syncing === '增量' ? '同步中…' : '同步佳明'}
             onPress={() => onSync(false)}
             chevron
