@@ -4,8 +4,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CANDIDATES, STORAGE_TOKEN_KEY } from './config';
 
-const DEFAULT_TIMEOUT = 30000;
-const PROBE_TIMEOUT = 15000;
+/* 超时：服务器实测 20–50ms，正常请求一两秒就回来。
+ * 之前设 30s，配上「fetch 失败再换 XHR」的串行重试，最坏要干等 60 秒才报错，
+ * 而这个 60 秒里往往是服务器正在重启 —— 等它重启完早就好了。所以压到 12s。 */
+const DEFAULT_TIMEOUT = 12000;
+const PROBE_TIMEOUT = 5000;
 const STORAGE_KEY = 'apiBase';
 
 let activeBase: string | null = null;
@@ -199,7 +202,11 @@ async function request<T = any>(
         return reject(bizFail.error);
       }
 
-      reject(new Error(`连不上服务器\n${notes.join('\n')}\n请确认手机能正常上网，然后点「重试」`));
+      reject(
+        new Error(
+          `连不上服务器\n${notes.join('\n')}\n\n手机能上网的话，多半是服务器正在重启（改配置后会有十几秒空档），稍等再点「重试」。`
+        )
+      );
     };
 
     bases.forEach((base) => {

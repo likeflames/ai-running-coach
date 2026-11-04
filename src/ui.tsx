@@ -9,6 +9,8 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -410,6 +412,50 @@ export function Empty({ text }: { text: string }) {
   );
 }
 
+/**
+ * 可展开的说明文字。
+ *
+ * 图表下面那些「横轴是什么、线在哪儿算危险」的长解释，平时没人看，
+ * 但它又确实有用 —— 所以默认只留一行小字，点开才展开。
+ * 用箭头旋转 + 内容直接出现（不做高度动画，避免测量不准导致跳动）。
+ */
+export function Hint({
+  label = '这张图怎么看',
+  children,
+}: {
+  label?: string;
+  children: React.ReactNode;
+}) {
+  const s = useStyles();
+  const [open, setOpen] = React.useState(false);
+  const anim = React.useRef(new Animated.Value(0)).current;
+
+  const toggle = React.useCallback(() => {
+    setOpen((prev) => {
+      const next = !prev;
+      Animated.timing(anim, {
+        toValue: next ? 1 : 0,
+        duration: 180,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+      return next;
+    });
+  }, [anim]);
+
+  const rotate = anim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] });
+
+  return (
+    <View style={s.hint}>
+      {open ? <Text style={s.hintBody}>{children}</Text> : null}
+      <Pressable onPress={toggle} hitSlop={10} style={s.hintHead}>
+        <Text style={s.hintLabel}>{open ? '收起' : label}</Text>
+        <Animated.Text style={[s.hintChev, { transform: [{ rotate }] }]}>›</Animated.Text>
+      </Pressable>
+    </View>
+  );
+}
+
 /** 细分割线 */
 export function Divider({ inset = 0 }: { inset?: number }) {
   const t = useTheme();
@@ -501,6 +547,12 @@ const useStyles = makeStyles((t: Theme) => ({
   rowLabel: { color: t.text2, fontSize: T.body },
   rowDots: { flex: 1 },
   rowValue: { color: t.text, fontSize: T.body, fontWeight: '500', ...TNUM },
+
+  hint: { marginTop: S.md },
+  hintHead: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  hintLabel: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
+  hintChev: { color: t.accent, fontSize: T.caption + 3, fontWeight: '500', marginTop: -1 },
+  hintBody: { color: t.text2, fontSize: T.caption + 1, lineHeight: 21, marginBottom: S.sm },
 
   btn: {
     paddingVertical: 12,

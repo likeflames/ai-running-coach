@@ -3,14 +3,10 @@
  * 支持多个候选地址：App 启动后会自动尝试，连不上的自动跳到下一个，
  * 并记住最后成功的那个（下次启动优先使用）。
  *
- *  1. 云服务器（上海）：任何网络下都可用，电脑关机也不影响
- *  2. Tailscale 地址：备用（仅手机开着 Tailscale 时可用）
- *  3. 家里局域网：同一 Wi-Fi 下最快
+ * 只剩云服务器一个：Tailscale 那条线因为证书被中间层替换，永远握手失败，
+ * 留着只会拖慢启动、还会在报错里干扰判断，已删除。
  */
-export const API_CANDIDATES = [
-  'http://150.158.157.101',
-  'https://likeflames.taild81f54.ts.net',
-];
+export const API_CANDIDATES = ['http://150.158.157.101'];
 
 /** 访问口令在本地存储里的键名 */
 export const STORAGE_TOKEN_KEY = 'rcToken';

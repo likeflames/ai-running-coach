@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { api, WeeklyReport, Fitness } from '../../../src/api';
-import { Screen, Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat } from '../../../src/ui';
+import { Screen, Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat, Hint } from '../../../src/ui';
 import { Bars, Heatmap, LineChart, Legend } from '../../../src/charts';
 import { ActivityList } from '../../../src/activityList';
 import { S, T, tsbColor, type Theme } from '../../../src/theme';
@@ -112,12 +112,12 @@ export default function HealthScreen() {
               { color: t.warn, label: '疲劳 — 最近几天的训练压力' },
             ]}
           />
-          <Text style={s.readHint}>
+          <Hint label="这两条线怎么看">
             横轴是日期，纵轴是负荷点数，两条线越高代表负担越重。看两条线的相对位置：
             <Text style={{ color: t.accent }}>蓝线在橙线上方</Text>
             ，说明底子在、恢复得过来；<Text style={{ color: t.warn }}>橙线窜到蓝线上方</Text>
             ，就是最近练猛了，容易累出伤。理想状态是蓝线缓慢爬升、橙线在它下面起伏。
-          </Text>
+          </Hint>
         </Card>
 
         <Card style={{ marginTop: S.sm }}>
@@ -137,12 +137,12 @@ export default function HealthScreen() {
             band={{ from: -10, to: 10, color: t.good }}
             series={[{ values: history.map((p) => p.tsb), color: t.purple, label: '状态', area: true }]}
           />
-          <Text style={s.readHint}>
+          <Hint label="这条线怎么读">
             这条线就是「体能减去疲劳」，可以直接理解成<Text style={{ color: t.text }}>今天身体还剩多少余量</Text>。
             绿色带（−10 ~ +10）是正常训练区间；<Text style={{ color: t.bad }}>掉到 −20 以下</Text>
             说明欠了太多恢复，该减量或休息；<Text style={{ color: t.warn }}>长期高于 +15</Text>
             说明最近太闲，体能会往下掉。比赛日最好安排在 +5 ~ +15 这一段。
-          </Text>
+          </Hint>
         </Card>
       </Section>
 
@@ -193,7 +193,6 @@ const useStyles = makeStyles((t: Theme) => ({
   meta: { color: t.text3, fontSize: T.micro + 1, lineHeight: 18 },
   statRow: { flexDirection: 'row', gap: S.sm },
   toggle: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
-  readHint: { color: t.text3, fontSize: T.micro + 1.5, lineHeight: 20, marginTop: S.md },
   collapsedRow: { flexDirection: 'row', alignItems: 'center', gap: S.sm },
   collapsedText: { color: t.text3, fontSize: T.caption, flex: 1, lineHeight: 20 },
 }));

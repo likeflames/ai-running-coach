@@ -57,6 +57,9 @@ export default function TodayScreen() {
   const [syncing, setSyncing] = React.useState<string | null>(null);
   const [advice, setAdvice] = React.useState<string | null>(null);
   const [adviceLoading, setAdviceLoading] = React.useState(false);
+  /** 单独存错误：之前是把错误串写进 advice，界面以为"已经有内容"，
+   *  于是永远不显示「重试」按钮，失败一次就卡住 */
+  const [adviceErr, setAdviceErr] = React.useState<string | null>(null);
   const [rem, setRem] = React.useState<ReminderSettings>({ enabled: false, hour: 7, minute: 20 });
   const [remBusy, setRemBusy] = React.useState(false);
 
@@ -156,11 +159,12 @@ export default function TodayScreen() {
 
   const loadAdvice = async () => {
     setAdviceLoading(true);
+    setAdviceErr(null);
     try {
       const d = await api.get<{ advice: string }>('/api/daily-advice');
       setAdvice(d.advice);
     } catch (e: any) {
-      setAdvice('加载失败：' + (e?.message || ''));
+      setAdviceErr(e?.message || '未知错误');
     } finally {
       setAdviceLoading(false);
     }
@@ -367,7 +371,25 @@ export default function TodayScreen() {
       <Section title="AI 今日训练建议">
         <Card>
           {advice ? (
-            <Text style={s.adviceBody}>{advice}</Text>
+            <>
+              <Text style={s.adviceBody}>{advice}</Text>
+              <Pressable onPress={loadAdvice} disabled={adviceLoading} hitSlop={10} style={{ marginTop: S.md }}>
+                <Text style={s.adviceRegen}>{adviceLoading ? '重新生成中…' : '重新生成'}</Text>
+              </Pressable>
+            </>
+          ) : adviceErr ? (
+            <View style={{ alignItems: 'flex-start' }}>
+              <Text style={s.adviceErrTitle}>这次没拿到建议</Text>
+              <Text style={s.adviceErrBody}>{adviceErr}</Text>
+              <View style={{ marginTop: S.md, alignSelf: 'stretch' }}>
+                <Btn
+                  title={adviceLoading ? '重试中…' : '重试'}
+                  onPress={loadAdvice}
+                  disabled={adviceLoading}
+                  primary
+                />
+              </View>
+            </View>
           ) : (
             <View style={{ alignItems: 'flex-start' }}>
               <Text style={s.adviceHint}>结合恢复数据、体能与计划，生成今天该怎么练</Text>
@@ -462,6 +484,9 @@ const useStyles = makeStyles((t: Theme) => ({
   adviceFoot: { color: t.text3, fontSize: T.micro, marginTop: S.sm, lineHeight: 17 },
   adviceBody: { color: t.text, fontSize: T.body2, lineHeight: 24 },
   adviceHint: { color: t.text2, fontSize: T.body2, lineHeight: 21 },
+  adviceRegen: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
+  adviceErrTitle: { color: t.text, fontSize: T.body2, fontWeight: '600', marginBottom: 4 },
+  adviceErrBody: { color: t.text3, fontSize: T.caption, lineHeight: 19 },
 
   link: { fontSize: T.body, fontWeight: '400' },
 

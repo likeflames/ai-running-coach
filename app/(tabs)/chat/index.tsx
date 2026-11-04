@@ -10,6 +10,8 @@ import {
   Platform,
   ActivityIndicator,
   Keyboard,
+  Animated,
+  Easing,
 } from 'react-native';
 import { api, chatStream, ChatEvent } from '../../../src/api';
 import { Glass } from '../../../src/glass';
@@ -24,8 +26,10 @@ interface Msg {
   thinking?: string;
   tool?: string;
   phase?: 'thinking' | 'answering' | 'done' | 'error';
-  expanded?: boolean;
 }
+
+/** 流式期间最多多久把缓冲的文字刷到界面一次。token 到得比这更密，合并掉 */
+const PUSH_MS = 110;
 
 const QUICK = [
   '根据我今天的恢复数据，今天该练什么？',
@@ -61,8 +65,15 @@ export default function ChatScreen() {
   const [input, setInput] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
+
+  /** 正在输出的那条单独放 state，历史消息不跟着重渲染 */
+  const [live, setLive] = React.useState<Msg | null>(null);
+  /** 逐 token 累积在 ref 里，不进 React —— 否则每个字都要渲染一次 */
   const draft = React.useRef<Msg | null>(null);
-  const [, tick] = React.useState(0);
+  const lastPush = React.useRef(0);
+  /** 用户是否停在底部。滑上去看历史时就别再抢滚动位置 */
+  const follow = React.useRef(true);
+
   const listRef = React.useRef<FlatList<Msg>>(null);
   const [meta, setMeta] = React.useState<{
     provider: string;
@@ -93,36 +104,44 @@ export default function ChatScreen() {
     loadMeta();
   }, [loadMeta]);
 
-  // 流式输出很密（每字一个事件），统一 100ms 刷一次界面，避免卡顿
-  React.useEffect(() => {
-    if (!busy) return;
-    const timer = setInterval(() => tick((n) => n + 1), 100);
-    return () => clearInterval(timer);
-  }, [busy]);
-
-  const onEvent = (ev: ChatEvent) => {
+  /** 把 ref 里的草稿节流刷到界面。只在内容真变了才 setState */
+  const push = React.useCallback((force = false) => {
     const d = draft.current;
     if (!d) return;
-    if (ev.t === 'reasoning') {
-      d.thinking = (d.thinking || '') + (ev.d || '');
-      d.phase = d.phase === 'answering' ? 'answering' : 'thinking';
-    } else if (ev.t === 'content') {
-      d.text += ev.d || '';
-      d.phase = 'answering';
-      d.tool = '';
-    } else if (ev.t === 'tool') {
-      d.tool = TOOL_LABELS[ev.d || ''] || `正在调用 ${ev.d}…`;
-    } else if (ev.t === 'error') {
-      d.text += `\n\n❌ ${ev.d || '出错了'}`;
-      d.phase = 'error';
-    }
-  };
+    const now = Date.now();
+    if (!force && now - lastPush.current < PUSH_MS) return;
+    lastPush.current = now;
+    setLive({ ...d });
+  }, []);
 
-  const commit = (m: Msg) => {
-    setMsgs((list) => [...list, m]);
+  const onEvent = React.useCallback(
+    (ev: ChatEvent) => {
+      const d = draft.current;
+      if (!d) return;
+      if (ev.t === 'reasoning') {
+        d.thinking = (d.thinking || '') + (ev.d || '');
+        if (d.phase !== 'answering') d.phase = 'thinking';
+      } else if (ev.t === 'content') {
+        d.text += ev.d || '';
+        d.phase = 'answering';
+        d.tool = '';
+      } else if (ev.t === 'tool') {
+        d.tool = TOOL_LABELS[ev.d || ''] || `正在调用 ${ev.d}…`;
+      } else if (ev.t === 'error') {
+        d.text += `\n\n❌ ${ev.d || '出错了'}`;
+        d.phase = 'error';
+      }
+      push();
+    },
+    [push]
+  );
+
+  const commit = React.useCallback((m: Msg) => {
     draft.current = null;
-    tick((n) => n + 1);
-  };
+    setLive(null);
+    setMsgs((list) => [...list, m]);
+    follow.current = true;
+  }, []);
 
   const send = async (text?: string) => {
     const msg = (text ?? input).trim();
@@ -136,7 +155,9 @@ export default function ChatScreen() {
 
     const aid = `a${Date.now()}`;
     draft.current = { id: aid, role: 'assistant', text: '', thinking: '', phase: 'thinking' };
-    tick((n) => n + 1);
+    lastPush.current = 0;
+    follow.current = true;
+    push(true);
 
     let gotAny = false;
     try {
@@ -182,8 +203,23 @@ export default function ChatScreen() {
     }
   };
 
-  const anyOpen = Object.values(expanded).some(Boolean);
-  const list = draft.current ? [...msgs, draft.current] : msgs;
+  const toggleThink = React.useCallback((id: string) => {
+    setExpanded((e) => ({ ...e, [id]: !e[id] }));
+  }, []);
+
+  // 只有消息或正在输出的草稿变了才重建，别的 state 不会牵动整个列表
+  const data = React.useMemo(() => (live ? [...msgs, live] : msgs), [msgs, live]);
+
+  // 「展开全部思考」只统计已经说完的消息 —— 流式期间不出现/消失，避免顶部跳动
+  const thinkingMsgs = msgs.filter((m) => m.thinking);
+  const allOpen = thinkingMsgs.length > 0 && thinkingMsgs.every((m) => expanded[m.id]);
+
+  const renderItem = React.useCallback(
+    ({ item }: { item: Msg }) => (
+      <Bubble item={item} open={!!expanded[item.id]} onToggle={toggleThink} />
+    ),
+    [expanded, toggleThink]
+  );
 
   return (
     <KeyboardAvoidingView
@@ -193,11 +229,25 @@ export default function ChatScreen() {
     >
       <FlatList
         ref={listRef}
-        data={list}
+        data={data}
         keyExtractor={(m) => m.id}
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ padding: S.md, paddingBottom: S.lg }}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={32}
+        /*
+         * 抖动的主因在这里：原来每次内容长高都调 scrollToEnd({ animated: true })，
+         * 上一个动画还没跑完下一个又来了，几个动画抢同一个滚动位置，看着就是一抖一抖。
+         * 改成非动画贴底 —— 它永远和内容同步，反而平滑。
+         */
+        onContentSizeChange={() => {
+          if (follow.current) listRef.current?.scrollToEnd({ animated: false });
+        }}
+        onScroll={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          const gap = contentSize.height - contentOffset.y - layoutMeasurement.height;
+          follow.current = gap < 120;
+        }}
         ListHeaderComponent={
           <View>
             {meta ? (
@@ -210,22 +260,22 @@ export default function ChatScreen() {
                 </Text>
               </Pressable>
             ) : null}
-            {list.some((m) => m.thinking) ? (
+            {thinkingMsgs.length > 0 ? (
               <Pressable
                 onPress={() => {
-                  if (anyOpen) {
+                  if (allOpen) {
                     setExpanded({});
                   } else {
                     const next: Record<string, boolean> = {};
-                    list.forEach((m) => {
-                      if (m.thinking) next[m.id] = true;
+                    thinkingMsgs.forEach((m) => {
+                      next[m.id] = true;
                     });
                     setExpanded(next);
                   }
                 }}
                 style={s.switchRow}
               >
-                <Text style={s.switchText}>{anyOpen ? '收起全部思考' : '展开全部思考'}</Text>
+                <Text style={s.switchText}>{allOpen ? '收起全部思考' : '展开全部思考'}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -244,53 +294,7 @@ export default function ChatScreen() {
             ))}
           </View>
         }
-        renderItem={({ item }) => {
-          if (item.role === 'user') {
-            return (
-              <View style={[s.bubble, s.userBubble]}>
-                <Text style={[s.bubbleText, { color: t.accentInk }]}>{item.text}</Text>
-              </View>
-            );
-          }
-          const isStreaming = item.id === draft.current?.id;
-          const open = expanded[item.id] ?? (isStreaming && item.phase === 'thinking');
-          return (
-            <View style={[s.bubble, s.aiBubble]}>
-              {item.thinking ? (
-                <Pressable
-                  onPress={() => setExpanded((e) => ({ ...e, [item.id]: !open }))}
-                  style={s.thinkHead}
-                >
-                  <Text style={s.thinkTitle}>思考过程 · {item.thinking.length} 字</Text>
-                  <Text style={s.thinkToggle}>{open ? '收起 ▲' : '展开 ▼'}</Text>
-                </Pressable>
-              ) : null}
-
-              {item.thinking && open ? (
-                <View style={s.thinkBox}>
-                  <Text style={s.thinkText}>{item.thinking}</Text>
-                </View>
-              ) : null}
-
-              {item.thinking && !open ? (
-                <Text style={s.thinkPeek} numberOfLines={1}>
-                  {item.thinking.replace(/\s+/g, ' ').slice(-70)}
-                </Text>
-              ) : null}
-
-              {item.tool ? <Text style={s.toolChip}>{item.tool}</Text> : null}
-
-              {item.text ? (
-                <Text style={s.bubbleText}>{item.text}</Text>
-              ) : isStreaming ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <ActivityIndicator size="small" color={t.accent} />
-                  <Text style={s.typingText}>{item.tool || '教练在思考…'}</Text>
-                </View>
-              ) : null}
-            </View>
-          );
-        }}
+        renderItem={renderItem}
       />
 
       {/*
@@ -315,6 +319,90 @@ export default function ChatScreen() {
         </Pressable>
       </Glass>
     </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * 一条消息。用 memo 包住 —— 流式时只有正在输出的那一条重渲染，
+ * 上面几十条历史气泡不动，这是「不抖」的另一半原因。
+ */
+const Bubble = React.memo(function Bubble({
+  item,
+  open,
+  onToggle,
+}: {
+  item: Msg;
+  open: boolean;
+  onToggle: (id: string) => void;
+}) {
+  const t = useTheme();
+  const s = useStyles();
+
+  if (item.role === 'user') {
+    return (
+      <View style={[s.bubble, s.userBubble]}>
+        <Text style={[s.bubbleText, { color: t.accentInk }]}>{item.text}</Text>
+      </View>
+    );
+  }
+
+  const streaming = item.phase === 'thinking' || item.phase === 'answering';
+
+  return (
+    <View style={[s.bubble, s.aiBubble]}>
+      {item.thinking ? (
+        <ThinkBlock text={item.thinking} open={open} onToggle={() => onToggle(item.id)} />
+      ) : null}
+
+      {item.tool ? <Text style={s.toolChip}>{item.tool}</Text> : null}
+
+      {item.text ? (
+        <Text style={s.bubbleText}>{item.text}</Text>
+      ) : streaming ? (
+        <View style={s.thinkingRow}>
+          <ActivityIndicator size="small" color={t.accent} />
+          <Text style={s.typingText}>{item.tool || '教练在思考…'}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+});
+
+/**
+ * 思考过程：默认收起成一行「思考中 · 328 字」。
+ *
+ * 之前是流式时默认摊开，内容一长就把整页往下推，配合自动滚动就成了抖动。
+ * 收起后高度恒定；想看随时点开，点开的高度变化是你自己触发的，不会突然跳。
+ */
+function ThinkBlock({ text, open, onToggle }: { text: string; open: boolean; onToggle: () => void }) {
+  const s = useStyles();
+  const anim = React.useRef(new Animated.Value(open ? 1 : 0)).current;
+
+  React.useEffect(() => {
+    Animated.timing(anim, {
+      toValue: open ? 1 : 0,
+      duration: 160,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [open, anim]);
+
+  const rotate = anim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] });
+
+  return (
+    <View>
+      <Pressable onPress={onToggle} hitSlop={10} style={s.thinkHead}>
+        <Text style={s.thinkTitle}>
+          {open ? '思考过程' : '思考中'} · {text.length} 字
+        </Text>
+        <Animated.Text style={[s.thinkChev, { transform: [{ rotate }] }]}>›</Animated.Text>
+      </Pressable>
+      {open ? (
+        <View style={s.thinkBox}>
+          <Text style={s.thinkText}>{text}</Text>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -349,9 +437,10 @@ const useStyles = makeStyles((t: Theme) => ({
   modelRow: { paddingVertical: 6, paddingHorizontal: 4, marginBottom: 2 },
   modelText: { color: t.text3, fontSize: T.micro, ...TNUM },
   switchText: { color: t.text3, fontSize: T.micro + 1 },
-  thinkHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 },
-  thinkTitle: { color: t.text3, fontSize: T.micro + 1, fontWeight: '600' },
-  thinkToggle: { color: t.accent, fontSize: T.micro + 1 },
+  thinkHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 7 },
+  thinkTitle: { flex: 1, color: t.text3, fontSize: T.micro + 1, fontWeight: '600' },
+  thinkChev: { color: t.text3, fontSize: T.caption + 2, fontWeight: '500', marginTop: -2 },
+  thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   thinkBox: {
     backgroundColor: t.bgSoft,
     borderRadius: R.xs,
@@ -361,7 +450,6 @@ const useStyles = makeStyles((t: Theme) => ({
     borderLeftColor: t.border,
   },
   thinkText: { color: t.text3, fontSize: T.micro + 1.5, lineHeight: 21 },
-  thinkPeek: { color: t.text3, fontSize: T.micro + 1, marginBottom: S.sm, opacity: 0.7 },
   toolChip: { color: t.accent, fontSize: T.micro + 1, marginBottom: 7 },
   typingText: { color: t.text3, fontSize: T.caption },
   inputBar: {
