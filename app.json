@@ -15,11 +15,16 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-    "NSAppTransportSecurity": {
-      "NSAllowsArbitraryLoads": true,
-      "NSAllowsLocalNetworking": true
-    },
-    "NSLocalNetworkUsageDescription": "用于连接你的训练数据服务器，同步跑步与健康数据"
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSExceptionDomains": {
+            "150.158.157.101": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            }
+          }
+        },
+        "NSLocalNetworkUsageDescription": "用于连接你的训练数据服务器，同步跑步与健康数据"
       }
     },
     "android": {

@@ -10,5 +10,4 @@
 export const API_CANDIDATES = [
   'http://150.158.157.101',
   'https://likeflames.taild81f54.ts.net',
-  'http://10.162.197.245:8000',
 ];
