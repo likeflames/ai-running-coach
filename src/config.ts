@@ -11,3 +11,6 @@ export const API_CANDIDATES = [
   'http://150.158.157.101',
   'https://likeflames.taild81f54.ts.net',
 ];
+
+/** 访问口令在本地存储里的键名 */
+export const STORAGE_TOKEN_KEY = 'rcToken';

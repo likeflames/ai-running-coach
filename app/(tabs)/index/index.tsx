@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator, Switch } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import { api, StatusResp, RecentActivity } from '../../../src/api';
@@ -8,6 +8,15 @@ import { Sparkline } from '../../../src/charts';
 import { C, S, levelColor, tsbColor } from '../../../src/theme';
 import { F } from '../../../src/format';
 import { ACTIVITY_TYPE, zh } from '../../../src/labels';
+import { getReminderSettings, setReminderEnabled, ReminderSettings } from '../../../src/notify';
+
+/** 提醒时间预设：够用就好，省得引一个日期选择器 */
+const TIME_PRESETS = [
+  { h: 6, m: 30, label: '6:30' },
+  { h: 7, m: 0, label: '7:00' },
+  { h: 7, m: 30, label: '7:30' },
+  { h: 8, m: 0, label: '8:00' },
+];
 
 export default function TodayScreen() {
   const router = useRouter();
@@ -18,6 +27,52 @@ export default function TodayScreen() {
   const [syncing, setSyncing] = React.useState<string | null>(null);
   const [advice, setAdvice] = React.useState<string | null>(null);
   const [adviceLoading, setAdviceLoading] = React.useState(false);
+  const [rem, setRem] = React.useState<ReminderSettings>({ enabled: false, hour: 7, minute: 20 });
+  const [remBusy, setRemBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    getReminderSettings().then(setRem);
+  }, []);
+
+  const toggleReminder = async (on: boolean) => {
+    setRemBusy(true);
+    try {
+      const r: any = await setReminderEnabled(on, rem.hour, rem.minute);
+      if (!r.ok) {
+        setRem({ ...rem, enabled: false });
+        Alert.alert(
+          '没有通知权限',
+          '请到 iPhone「设置 → 通知 → AI跑步教练」里允许通知，再回来打开开关。'
+        );
+        return;
+      }
+      setRem({ ...rem, enabled: on });
+      if (on) {
+        if (r.scheduled) {
+          Alert.alert('已开启', `未来 ${r.scheduled} 天的提醒都排好了。\n每周打开一次 App 会自动往后补。`);
+        } else {
+          Alert.alert('开关已打开', r.error ? `这次没排上：${r.error}\n联网后打开 App 会自动补。` : '联网后打开 App 会自动排上。');
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('设置失败', e?.message || '未知错误');
+    } finally {
+      setRemBusy(false);
+    }
+  };
+
+  const pickTime = async (h: number, m: number) => {
+    const next = { ...rem, hour: h, minute: m };
+    setRem(next);
+    if (next.enabled) {
+      setRemBusy(true);
+      try {
+        await setReminderEnabled(true, h, m);
+      } finally {
+        setRemBusy(false);
+      }
+    }
+  };
 
   const load = React.useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -173,6 +228,55 @@ export default function TodayScreen() {
           <Btn title={syncing === '全量' ? '拉取中…' : '全量历史'} onPress={() => onSync(true)} disabled={!!syncing} />
           <Btn title={syncing === '上传' ? '解析中…' : '上传 .fit'} onPress={onUpload} disabled={!!syncing} color={C.purple} />
         </View>
+      </Section>
+
+      {/* 每日提醒 */}
+      <Section title="每日提醒">
+        <Card>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingRight: S.md }}>
+              <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }}>早上提醒今天练什么</Text>
+              <Text style={{ color: C.text3, fontSize: 11, marginTop: 3, lineHeight: 16 }}>
+                到点弹一条通知，写明今天跑多少、什么配速、要不要练力量
+              </Text>
+            </View>
+            {remBusy ? (
+              <ActivityIndicator color={C.accent} />
+            ) : (
+              <Switch
+                value={rem.enabled}
+                onValueChange={toggleReminder}
+                trackColor={{ false: C.border, true: C.accent }}
+                thumbColor="#fff"
+              />
+            )}
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: S.sm, marginTop: S.md }}>
+            {TIME_PRESETS.map((t) => {
+              const on = rem.hour === t.h && rem.minute === t.m;
+              return (
+                <Pressable
+                  key={t.label}
+                  onPress={() => pickTime(t.h, t.m)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 9,
+                    borderRadius: 10,
+                    alignItems: 'center',
+                    backgroundColor: on ? C.accent + '22' : C.bgSoft,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: on ? C.accent : C.borderSoft,
+                  }}
+                >
+                  <Text style={{ color: on ? C.accent : C.text2, fontSize: 13, fontWeight: on ? '700' : '500' }}>
+                    {t.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Card>
       </Section>
 
       {/* AI 今日建议正文 */}

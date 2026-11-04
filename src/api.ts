@@ -2,7 +2,7 @@
  * 支持多地址自动切换：连不上就换下一个候选地址，并记住可用的那个
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_CANDIDATES } from './config';
+import { API_CANDIDATES, STORAGE_TOKEN_KEY } from './config';
 
 const DEFAULT_TIMEOUT = 30000;
 const PROBE_TIMEOUT = 15000;
@@ -11,11 +11,37 @@ const STORAGE_KEY = 'apiBase';
 let activeBase: string | null = null;
 /** 某些机型上 fetch 走不通但 XHR 可以，记下来优先用 XHR */
 let preferXhr = false;
+/** 访问口令：服务器开了鉴权时每个请求都要带 */
+let accessToken = '';
+/** 服务器说口令不对时，回调让 UI 弹出输入框，返回新口令（取消则 null） */
+let askTokenHandler: (() => Promise<string | null>) | null = null;
+
+export function getAccessToken() {
+  return accessToken;
+}
+
+/** UI 层注册「请用户输入口令」的处理函数 */
+export function registerTokenPrompt(fn: (() => Promise<string | null>) | null) {
+  askTokenHandler = fn;
+}
+
+export async function setAccessToken(t: string) {
+  accessToken = t.trim();
+  try {
+    await AsyncStorage.setItem(STORAGE_TOKEN_KEY, accessToken);
+  } catch {
+    /* ignore */
+  }
+}
 
 const ready: Promise<void> = (async () => {
   try {
-    const saved = await AsyncStorage.getItem(STORAGE_KEY);
+    const [saved, token] = await Promise.all([
+      AsyncStorage.getItem(STORAGE_KEY),
+      AsyncStorage.getItem(STORAGE_TOKEN_KEY),
+    ]);
     if (saved && API_CANDIDATES.includes(saved)) activeBase = saved;
+    if (token) accessToken = token;
   } catch {
     /* ignore */
   }
@@ -26,7 +52,15 @@ function orderedBases(): string[] {
   return [activeBase, ...API_CANDIDATES.filter((b) => b !== activeBase)];
 }
 
-type Result<T> = { ok: true; data: T } | { ok: false; network: boolean; error: Error };
+/** 给请求头补上口令 */
+function withAuth(options: RequestInit): RequestInit {
+  if (!accessToken) return options;
+  const headers: Record<string, string> = { ...((options.headers as any) || {}) };
+  headers['X-RC-Token'] = accessToken;
+  return { ...options, headers };
+}
+
+type Result<T> = { ok: true; data: T } | { ok: false; network: boolean; status?: number; error: Error };
 
 /** 通道一：标准 fetch */
 async function fetchOnce<T>(url: string, options: RequestInit, timeoutMs: number): Promise<Result<T>> {
@@ -41,7 +75,7 @@ async function fetchOnce<T>(url: string, options: RequestInit, timeoutMs: number
       } catch {
         /* ignore */
       }
-      return { ok: false, network: false, error: new Error(`HTTP ${res.status} ${detail}`.trim()) };
+      return { ok: false, network: false, status: res.status, error: new Error(`HTTP ${res.status} ${detail}`.trim()) };
     }
     return { ok: true, data: (await res.json()) as T };
   } catch (e: any) {
@@ -88,7 +122,7 @@ function xhrOnce<T>(url: string, options: RequestInit, timeoutMs: number): Promi
           } catch {
             /* ignore */
           }
-          finish({ ok: false, network: false, error: new Error(`HTTP ${xhr.status} ${detail}`.trim()) });
+          finish({ ok: false, network: false, status: xhr.status, error: new Error(`HTTP ${xhr.status} ${detail}`.trim()) });
         }
       };
       xhr.onerror = () => {
@@ -112,13 +146,14 @@ function xhrOnce<T>(url: string, options: RequestInit, timeoutMs: number): Promi
 }
 
 async function rawRequest<T>(url: string, options: RequestInit, timeoutMs: number): Promise<Result<T>> {
-  if (preferXhr) return xhrOnce<T>(url, options, timeoutMs);
+  const opts = withAuth(options);
+  if (preferXhr) return xhrOnce<T>(url, opts, timeoutMs);
 
-  const r = await fetchOnce<T>(url, options, timeoutMs);
+  const r = await fetchOnce<T>(url, opts, timeoutMs);
   if (r.ok || !r.network) return r; // 成功，或服务器已响应（业务错误）
 
   // fetch 通道失败：换 XHR 再试一次
-  const alt = await xhrOnce<T>(url, options, timeoutMs);
+  const alt = await xhrOnce<T>(url, opts, timeoutMs);
   if (alt.ok || !alt.network) {
     preferXhr = true; // 记住：这台设备用 XHR 才通
     return alt;
@@ -130,15 +165,42 @@ async function rawRequest<T>(url: string, options: RequestInit, timeoutMs: numbe
   };
 }
 
-async function request<T = any>(path: string, options: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
+async function request<T = any>(
+  path: string,
+  options: RequestInit = {},
+  timeoutMs = DEFAULT_TIMEOUT,
+  retried = false
+): Promise<T> {
   await ready;
   const bases = orderedBases();
 
   // 多个候选地址并行发，谁先成功用谁（避免逐个超时干等）
   return new Promise<T>((resolve, reject) => {
     let pending = bases.length;
-    let bizError: Error | null = null;
+    let bizFail: { status?: number; error: Error } | null = null;
+    let settled = false;
     const notes: string[] = [];
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+
+      if (bizFail) {
+        // 口令不对：请用户输入一次，然后重试
+        if (bizFail.status === 401 && !retried && askTokenHandler) {
+          askTokenHandler()
+            .then((t) => {
+              if (!t) return reject(new Error('需要访问口令，请在设置里填写'));
+              return setAccessToken(t).then(() => request<T>(path, options, timeoutMs, true)).then(resolve, reject);
+            })
+            .catch(reject);
+          return;
+        }
+        return reject(bizFail.error);
+      }
+
+      reject(new Error(`连不上服务器\n${notes.join('\n')}\n请确认手机能正常上网，然后点「重试」`));
+    };
 
     bases.forEach((base) => {
       const isActive = base === activeBase;
@@ -148,6 +210,8 @@ async function request<T = any>(path: string, options: RequestInit = {}, timeout
       rawRequest<T>(`${base}${path}`, options, timeout)
         .then((r) => {
           if (r.ok) {
+            if (settled) return;
+            settled = true;
             if (activeBase !== base) {
               activeBase = base;
               AsyncStorage.setItem(STORAGE_KEY, base).catch(() => {});
@@ -157,21 +221,15 @@ async function request<T = any>(path: string, options: RequestInit = {}, timeout
           }
           if (!r.network) {
             // 服务器有响应（业务错误），记下来备用
-            if (!bizError) bizError = r.error;
+            if (!bizFail) bizFail = { status: r.status, error: r.error };
           } else {
             const secs = ((Date.now() - started) / 1000).toFixed(1);
             notes.push(`${base.replace(/^https?:\/\//, '')}：${r.error.message}（${secs}s）`);
           }
-          if (--pending === 0) {
-            if (bizError) reject(bizError);
-            else reject(new Error(`连不上服务器\n${notes.join('\n')}\n请确认手机能正常上网，然后点「重试」`));
-          }
+          if (--pending === 0) finish();
         })
-        .catch((e) => {
-          if (--pending === 0) {
-            if (bizError) reject(bizError);
-            else reject(new Error(`连不上服务器\n${notes.join('\n')}\n请确认手机能正常上网，然后点「重试」`));
-          }
+        .catch(() => {
+          if (--pending === 0) finish();
         });
     });
   });
@@ -267,14 +325,16 @@ function streamOnce(
       }
     };
 
-    const fail = (msg: string) => {
+    const fail = (msg: string, status?: number) => {
       const err: any = new Error(msg);
       err.started = started;
+      err.status = status;
       reject(err);
     };
 
     xhr.open('POST', `${base}/api/chat/stream`);
     xhr.setRequestHeader('Accept', 'text/event-stream');
+    if (accessToken) xhr.setRequestHeader('X-RC-Token', accessToken);
     xhr.timeout = 300000;
     xhr.onprogress = flush;
     xhr.onload = () => {
@@ -286,7 +346,7 @@ function streamOnce(
         } catch {
           /* ignore */
         }
-        fail(`HTTP ${xhr.status} ${detail}`.trim());
+        fail(`HTTP ${xhr.status} ${detail}`.trim(), xhr.status);
         return;
       }
       if (activeBase !== base) {
@@ -313,7 +373,8 @@ function streamOnce(
 export async function chatStream(
   message: string,
   history: { role: string; content: string }[],
-  onEvent: (ev: ChatEvent) => void
+  onEvent: (ev: ChatEvent) => void,
+  retried = false
 ): Promise<void> {
   await ready;
   const bases = orderedBases();
@@ -325,6 +386,15 @@ export async function chatStream(
       return;
     } catch (e: any) {
       if (e?.started) throw e;
+      // 口令不对：输入一次后整体重来
+      if (e?.status === 401 && askTokenHandler && !retried) {
+        const t = await askTokenHandler();
+        if (t) {
+          await setAccessToken(t);
+          return chatStream(message, history, onEvent, true);
+        }
+        throw new Error('需要访问口令，请在设置里填写');
+      }
       lastError = new Error(e?.message || '网络错误');
     }
   }
