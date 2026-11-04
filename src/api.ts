@@ -539,6 +539,18 @@ export interface Recovery {
   body_battery: number | null;
   resting_hr: number | null;
   stress_avg: number | null;
+  /** Oura 独有：准备度 / 体温偏移 / 夜间平均心率 */
+  readiness_score?: number | null;
+  temp_deviation?: number | null;
+  night_hr?: number | null;
+  /** 睡眠分期（分钟），Oura 和佳明都给 */
+  deep_minutes?: number | null;
+  light_minutes?: number | null;
+  rem_minutes?: number | null;
+  awake_minutes?: number | null;
+  sleep_efficiency?: number | null;
+  sleep_latency_min?: number | null;
+  source?: string | null;
 }
 
 export interface RecentActivity {

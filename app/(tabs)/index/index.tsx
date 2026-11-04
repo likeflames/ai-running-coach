@@ -336,6 +336,41 @@ export default function TodayScreen() {
             <Stat label="睡眠时长" value={rec.sleep_minutes ? F.duration(rec.sleep_minutes) : '-'} />
             <View style={{ flex: 1, minWidth: 70 }} />
           </View>
+
+          {/* 睡眠分期：只看总时长会被「躺够 8 小时但深睡只有 40 分钟」骗过去 */}
+          {rec.deep_minutes || rec.rem_minutes ? (
+            <View style={{ marginTop: S.md }}>
+              <View style={s.sleepBar}>
+                {(() => {
+                  const parts = [
+                    { v: rec.deep_minutes || 0, c: '#5E5CE6' },   // 深睡
+                    { v: rec.light_minutes || 0, c: '#64D2FF' },  // 浅睡
+                    { v: rec.rem_minutes || 0, c: '#BF5AF2' },    // REM
+                    { v: rec.awake_minutes || 0, c: t.text3 },    // 清醒
+                  ];
+                  const total = parts.reduce((a, b) => a + b.v, 0) || 1;
+                  return parts.map((p, i) =>
+                    p.v > 0 ? (
+                      <View key={i} style={{ flex: p.v / total, backgroundColor: p.c }} />
+                    ) : null
+                  );
+                })()}
+              </View>
+              <View style={[s.statRow, { marginTop: S.sm }]}>
+                <Stat label="深睡" value={rec.deep_minutes ?? null} unit="分" />
+                <Stat label="浅睡" value={rec.light_minutes ?? null} unit="分" />
+                <Stat label="REM" value={rec.rem_minutes ?? null} unit="分" />
+                <Stat label="清醒" value={rec.awake_minutes ?? null} unit="分" />
+              </View>
+              {rec.sleep_efficiency ? (
+                <Text style={[s.adviceFoot, { marginTop: S.sm }]}>
+                  睡眠效率 {F.num(rec.sleep_efficiency, 0)}%
+                  {rec.sleep_latency_min ? ` · 入睡耗时 ${rec.sleep_latency_min} 分` : ''}
+                  {rec.source ? ` · 数据来自 ${rec.source}` : ''}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
         </View>
       </Card>
 
@@ -620,6 +655,8 @@ const useStyles = makeStyles((t: Theme) => ({
   track: { height: 8, borderRadius: 5, overflow: 'hidden', marginTop: S.xs },
 
   statRow: { flexDirection: 'row', gap: S.sm },
+  /** 睡眠分期的堆叠条：宽度按各阶段时长占比分配 */
+  sleepBar: { flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden' },
 
   adviceText: { fontSize: 22, fontWeight: '600', letterSpacing: -0.5, lineHeight: 30 },
   adviceReason: { color: t.text2, fontSize: T.body2, lineHeight: 21, marginTop: S.sm - 2 },
