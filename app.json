@@ -9,11 +9,6 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0f1115",
-    "splash": {
-      "backgroundColor": "#0f1115",
-      "resizeMode": "contain",
-      "image": "./assets/splash-icon.png"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.likeflames.runningcoach",
@@ -36,7 +31,17 @@
       "bundler": "metro"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#0f1115"
+        }
+      ]
     ],
     "extra": {
       "router": {
