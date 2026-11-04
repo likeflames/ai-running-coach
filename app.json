@@ -14,7 +14,11 @@
       "bundleIdentifier": "com.likeflames.runningcoach",
       "buildNumber": "1",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "用于在局域网内直连家里电脑上的训练数据服务"
       }
     },
     "android": {

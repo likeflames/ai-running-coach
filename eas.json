@@ -14,6 +14,13 @@
         "buildConfiguration": "Release"
       }
     },
+    "unsigned": {
+      "distribution": "internal",
+      "withoutCredentials": true,
+      "ios": {
+        "buildConfiguration": "Release"
+      }
+    },
     "production": {
       "autoIncrement": true
     }
