@@ -32,7 +32,16 @@ jobs:
       - name: Select Xcode 26
         run: |
           set -euo pipefail
-          APP=$(ls -d /Applications/Xcode_26.*.app 2>/dev/null | sort -V | tail -1 || true)
+          # 要 Xcode 26（Swift 6.2），但不要最新的 26.3：它对 Swift 6 数据竞争的检查
+          # 更严，expo-modules-jsi 会报 `sending 'slot' risks causing data races` 直接编译失败。
+          # 26.0 / 26.1 都能过，按顺序取第一个存在的。
+          APP=""
+          for v in 26.0 26.0.1 26.1 26.1.1 26.2 26.2.0; do
+            if [ -d "/Applications/Xcode_${v}.app" ]; then APP="/Applications/Xcode_${v}.app"; break; fi
+          done
+          if [ -z "$APP" ]; then
+            APP=$(ls -d /Applications/Xcode_26.*.app 2>/dev/null | sort -V | head -1 || true)
+          fi
           if [ -z "$APP" ]; then
             echo "::error::这台机器上没有 Xcode 26，换机器池"
             ls -1 /Applications | grep -i xcode || true
