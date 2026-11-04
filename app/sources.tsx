@@ -281,12 +281,17 @@ export default function SourcesScreen() {
                 <Btn title="断开" onPress={() => disconnect(src)} disabled={busy === src.id} small />
               </>
             )}
-            <Btn
-              title={editing === src.id ? '收起凭据' : '凭据'}
-              onPress={() => toggleCred(src)}
-              disabled={busy === src.id}
-              small
-            />
+            {/* 应用级凭据（Oura 的 client_id/secret）已经配好时就不给普通用户看了：
+                那不是他的东西，摆在这里只会让人以为「我还得去注册个开发者应用」。
+                佳明是个人账号，永远要能改，所以 auth==='account' 时一直显示。 */}
+            {src.auth === 'account' || !src.configured ? (
+              <Btn
+                title={editing === src.id ? '收起凭据' : '凭据'}
+                onPress={() => toggleCred(src)}
+                disabled={busy === src.id}
+                small
+              />
+            ) : null}
             {src.id === 'oura' ? (
               <Btn
                 title="切换账号"
@@ -336,11 +341,7 @@ export default function SourcesScreen() {
 
       <Hint label="为什么 Oura 不能当主数据源？">
         Oura 戒指没有 GPS，只能给出睡眠、HRV、准备度和「运动时长」，跑步的距离是手机在旁边时估出来的，
-        经常是空的，更没有每公里配速。所以用它补恢复数据很准，跑量还得靠佳明或 Strava。
-        {'\n\n'}
-        Strava 是跑步数据的事实标准（距离、配速、心率、分段、轨迹都有），
-        但 2026 年起 Strava 要求开发者账号本身是付费订阅用户才能创建 API 应用，
-        且默认只能授权自己一个账号（10 人以内无需审核）。
+        经常是空的，更没有每公里配速。所以用它补恢复数据很准，跑量和配速还得靠佳明。
       </Hint>
 
       <Hint label="Oura 会员到底挂在谁身上？">
