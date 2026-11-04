@@ -47,3 +47,4 @@ qr_*.png
 
 # 构建产物
 dist-ipa/
+gh_status.json
