@@ -8,9 +8,10 @@ import {
   StrengthProgramme,
   StrengthBlock,
 } from '../../../src/api';
-import { Screen, Card, CardHead, Section, Loading, ErrorBox, Empty, Pill, Stat } from '../../../src/ui';
+import { Screen, Card, CardHead, Section, Loading, ErrorBox, Empty, Pill, Stat, Btn } from '../../../src/ui';
 import { S, T, R, TNUM, alpha, type Theme } from '../../../src/theme';
 import { makeStyles, useTheme } from '../../../src/theme-provider';
+import { useRouter } from 'expo-router';
 import { F } from '../../../src/format';
 import { PHASE, PACE_ZONE, WORKOUT_TYPE, restLabel, setsLabel, zh } from '../../../src/labels';
 
@@ -26,6 +27,7 @@ function verdictOf(t: Theme, verdict: string) {
 export default function TrainingScreen() {
   const t = useTheme();
   const s = useStyles();
+  const router = useRouter();
   const [data, setData] = React.useState<TrainingSchedule | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -92,6 +94,23 @@ export default function TrainingScreen() {
       </Screen>
     );
   if (!data) return null;
+
+  // 新用户没填目标 / 5 公里成绩时，后端只回 {"needs_profile": true, "reason": ...}，
+  // 没有 weeks。这里不拦住的话，下面的 data.weeks.find 会直接白屏。
+  if (!data.weeks?.length) {
+    return (
+      <Screen>
+        <Card>
+          <CardHead title="还没有训练计划" />
+          <Text style={s.summary}>
+            {(data as any).reason || '先把目标、每周训练天数和 5 公里成绩填上，才排得出课表。'}
+          </Text>
+          <View style={{ height: S.md }} />
+          <Btn title="去完善资料" onPress={() => router.push('/profile')} primary small />
+        </Card>
+      </Screen>
+    );
+  }
 
   const g = data.guardrail;
   const v = g ? verdictOf(t, g.verdict) : null;
