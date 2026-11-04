@@ -13,10 +13,13 @@ concurrency:
 
 jobs:
   build:
-    # macos-26 是 arm64，容量紧的时候会长时间排不上队。
-    # 换到 macos-15：同为 Xcode 16，但属于另一个机器池，排队情况通常好一些。
-    runs-on: macos-14
-    timeout-minutes: 60
+    # 机器池选择说明（踩过的坑）：
+    # - macos-14 只有 Xcode 15.4 / iOS SDK 17.5，RN 0.88 + Expo 58 需要 Xcode 16+，编译必失败；
+    # - macos-15 的池子长期排队，实测 30 分钟拿不到机器；
+    # - macos-26 是 arm64 池，容量紧但能拿到，Xcode 26 完整支持。
+    # 因此固定 macos-26；拿不到机器时用 workflow_dispatch 重试即可。
+    runs-on: macos-26
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -24,9 +27,17 @@ jobs:
 
       - name: Show toolchain
         run: |
+          set -euo pipefail
           xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
+          SDK=$(xcrun --sdk iphoneos --show-sdk-version)
+          echo "iOS SDK: $SDK"
           node --version
+          # RN 0.88 / Expo 58 需要 Xcode 16 及以上；SDK 版本过低直接失败，避免出现一堆看不懂的编译错误
+          MAJOR=${SDK%%.*}
+          if [ "$MAJOR" -lt 18 ]; then
+            echo "::error::iOS SDK $SDK 过低（需要 18+）。当前机器池不对，请换 runs-on。"
+            exit 1
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
