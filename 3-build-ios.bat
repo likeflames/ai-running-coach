@@ -1,41 +1,56 @@
 @echo off
+setlocal
 cd /d "%~dp0"
+title AI Running Coach - iOS Build
 
-if not exist token.txt (
-  echo [ERROR] token.txt not found.
-  echo Create a full-access token at https://expo.dev/settings/access-tokens
-  echo Save it into token.txt, then run this file again.
-  pause
-  exit /b 1
-)
+echo ============================================
+echo  Step 1/2   Check Expo login
+echo ============================================
+echo.
 
+if not exist token.txt goto no_token
+set "EXPO_TOKEN="
 for /f "usebackq delims=" %%a in ("token.txt") do set "EXPO_TOKEN=%%a"
+if not defined EXPO_TOKEN goto no_token
 
-echo ============================================
-echo  Step 1/2  Check Expo login
-echo ============================================
-npx eas-cli whoami
-echo.
+call npx eas-cli whoami
+if errorlevel 1 goto token_bad
 
+echo.
 echo ============================================
-echo  Step 2/2  Build iOS app in Expo cloud
+echo  Step 2/2   Build iOS app in Expo cloud
 echo ============================================
 echo.
-echo  You will be asked to sign in to your Apple ID.
+echo  You will be asked to sign in with your Apple ID.
 echo  A free Apple ID works. A 6-digit code may be
-echo  sent to your iPhone - type it here.
+echo  sent to your iPhone - type it in this window.
 echo.
-echo  Build takes about 5-15 minutes.
-echo  Keep this window open.
+echo  Build takes about 5-15 minutes. Keep it open.
 echo.
 pause
 
-npx eas-cli build --platform ios --profile preview
-
+call npx eas-cli build --platform ios --profile preview
+set "RC=%ERRORLEVEL%"
 echo.
-echo ============================================
-echo  If a link / QR code appeared above, open it
-echo  on your iPhone to install the app.
-echo  If it failed, copy the error text to the chat.
-echo ============================================
+if not "%RC%"=="0" echo [FAILED] exit code %RC%
+if "%RC%"=="0" echo [OK] Scan the QR code with your iPhone camera to install.
+echo.
 pause
+exit /b %RC%
+
+:no_token
+echo [ERROR] token.txt missing or empty.
+echo Open https://expo.dev/settings/access-tokens
+echo Create a token named "build" with Limit access OFF,
+echo then run 4-save-token.bat to store it.
+echo.
+pause
+exit /b 1
+
+:token_bad
+echo.
+echo [ERROR] This token cannot access the Expo account.
+echo Create a NEW token (Limit access OFF) and save it again.
+echo.
+pause
+exit /b 1
