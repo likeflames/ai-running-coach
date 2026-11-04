@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, Alert, ActivityIndicator, Switch, Pressable, Animated, Easing } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import { api, adviceStream, StatusResp, RecentActivity } from '../../../src/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -120,9 +120,18 @@ export default function TodayScreen() {
     }
   }, []);
 
-  React.useEffect(() => {
-    load();
-  }, [load]);
+  // 回到首页时静默刷新一次：在数据源页同步完切回来，训练和恢复数据要立刻是新的
+  const firstFocus = React.useRef(true);
+  useFocusEffect(
+    React.useCallback(() => {
+      if (firstFocus.current) {
+        firstFocus.current = false;
+        load();
+        return;
+      }
+      load(true);
+    }, [load])
+  );
 
   const onSync = async (all = false) => {
     setSyncing(all ? '全量' : '增量');

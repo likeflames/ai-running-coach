@@ -94,7 +94,10 @@ export default function SourcesScreen() {
   const sync = async (src: SourceInfo) => {
     setBusy(src.id);
     try {
-      const r = await api.post<any>(`/api/sources/${src.id}/sync?days=14`, {}, 120000);
+      // 佳明一次同步要逐天打 5 个接口，14 天已经够慢；
+      // Oura 是按区间一次拉完，放宽到 90 天才不会漏掉几周前那次跑步。
+      const days = src.auth === 'oauth' ? 90 : 14;
+      const r = await api.post<any>(`/api/sources/${src.id}/sync?days=${days}`, {}, 120000);
       const rec = r?.recovery?.recovery_days ?? 0;
       const act = r?.activity?.activities;
       Alert.alert(

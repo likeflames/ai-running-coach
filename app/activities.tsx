@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { api, Activity } from '../src/api';
 import { Screen, Card, Loading, ErrorBox, Empty, Pill } from '../src/ui';
 import { S, T, type Theme } from '../src/theme';
@@ -16,22 +16,37 @@ export default function AllActivitiesScreen() {
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
+  const load = React.useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const d = await api.get<{ activities: Activity[] }>('/api/activities');
       setItems(d.activities || []);
       setErr(null);
     } catch (e: any) {
-      setErr(e?.message || '加载失败');
+      if (!quiet) setErr(e?.message || '加载失败');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  React.useEffect(() => {
-    load();
-  }, [load]);
+  /**
+   * 每次回到这一页都重新取一次。
+   *
+   * 用 useEffect 只在挂载时取一次，页面就会被「冻住」：用户去数据源页同步完
+   * 再返回，看到的还是同步前那份列表，看起来就像「同步了但历史里没有」。
+   * 首次进页面才显示整页 loading，之后静默刷新，避免每次切回来都闪一下。
+   */
+  const firstFocus = React.useRef(true);
+  useFocusEffect(
+    React.useCallback(() => {
+      if (firstFocus.current) {
+        firstFocus.current = false;
+        load();
+        return;
+      }
+      load(true);
+    }, [load])
+  );
 
   if (loading) return <Loading />;
   if (err)

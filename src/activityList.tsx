@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { api, Activity } from './api';
 import { Card, Empty, Pill, Loading } from './ui';
 import { S, T, type Theme } from './theme';
@@ -20,20 +20,26 @@ export function ActivityList({ pageSize = 8 }: { pageSize?: number }) {
   const [err, setErr] = React.useState<string | null>(null);
   const [shown, setShown] = React.useState(pageSize);
 
-  React.useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const d = await api.get<{ activities: Activity[] }>('/api/activities');
-        if (alive) setItems(d.activities || []);
-      } catch (e: any) {
-        if (alive) setErr(e?.message || '加载失败');
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // 和「全部活动」页一样，回到这个标签页就重新取：否则同步完数据回来还是旧列表
+  useFocusEffect(
+    React.useCallback(() => {
+      let alive = true;
+      (async () => {
+        try {
+          const d = await api.get<{ activities: Activity[] }>('/api/activities');
+          if (alive) {
+            setItems(d.activities || []);
+            setErr(null);
+          }
+        } catch (e: any) {
+          if (alive) setErr(e?.message || '加载失败');
+        }
+      })();
+      return () => {
+        alive = false;
+      };
+    }, [])
+  );
 
   if (err)
     return (
