@@ -13,52 +13,36 @@ concurrency:
 
 jobs:
   build:
-    # 机器池选择（踩过的坑，别随便改）：
+    # 机器池只能用 macos-26（Xcode 26.6 / iPhoneOS 26.5 SDK）。踩过的坑：
     #
-    # - macos-15 是标准池，基本 1 分钟内就能拿到机器。它同时预装了 Xcode 16.x 和
-    #   Xcode 26.x，但默认指向 Xcode_16.4（Swift 6.1）。而 RN 0.88 自带的
-    #   ReactNativeDependencies 里的 Swift 包要求 swift-tools 6.2，
-    #   所以「直接 build」会报 `package 'apple' is using Swift tools version 6.2.0
-    #   but the installed version is 6.1.0`。下面显式切到 Xcode 26 即可。
-    # - macos-26 池子自带 Xcode 26，但容量极紧：经常排队 20 分钟后直接判定
-    #   「job was not acquired by Runner of type hosted」，白等一场。
-    runs-on: macos-15
+    # - macos-14：只有 Xcode 15.4 / iOS SDK 17.5，RN 0.88 直接编不过。
+    # - macos-15：预装 Xcode 26.0~26.3，但 ReactNativeDependencies 里的 Swift 包
+    #   要求 swift-tools 6.2；就算切到 26.3，expo-modules-jsi 也会在
+    #   JavaScriptObject.swift 报 `sending 'slot' risks causing data races`
+    #   （降到 Swift 5 语言模式会引出 `'$' is not a valid digit` 等一串新错误）。
+    #   只有 Xcode 26.6 的编译器能干净编过。
+    # - macos-26：容量紧，常见「排队 15~20 分钟后判定拿不到机器」，
+    #   看到这种失败直接重跑即可，不是代码问题。
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 26
+      - name: Show toolchain
         run: |
           set -euo pipefail
-          # 要 Xcode 26（Swift 6.2），但不要最新的 26.3：它对 Swift 6 数据竞争的检查
-          # 更严，expo-modules-jsi 会报 `sending 'slot' risks causing data races` 直接编译失败。
-          # 26.0 / 26.1 都能过，按顺序取第一个存在的。
-          APP=""
-          for v in 26.0 26.0.1 26.1 26.1.1 26.2 26.2.0; do
-            if [ -d "/Applications/Xcode_${v}.app" ]; then APP="/Applications/Xcode_${v}.app"; break; fi
-          done
-          if [ -z "$APP" ]; then
-            APP=$(ls -d /Applications/Xcode_26.*.app 2>/dev/null | sort -V | head -1 || true)
-          fi
-          if [ -z "$APP" ]; then
-            echo "::error::这台机器上没有 Xcode 26，换机器池"
-            ls -1 /Applications | grep -i xcode || true
-            exit 1
-          fi
-          echo "使用 $APP"
-          sudo xcode-select -s "$APP"
           xcodebuild -version
           SDK=$(xcrun --sdk iphoneos --show-sdk-version)
           echo "iOS SDK: $SDK"
-          MAJOR=${SDK%%.*}
-          if [ "$MAJOR" -lt 18 ]; then
-            echo "::error::iOS SDK $SDK 过低（需要 18+），Xcode 没切成功"
-            exit 1
-          fi
           swift --version
           node --version
+          MAJOR=${SDK%%.*}
+          if [ "$MAJOR" -lt 18 ]; then
+            echo "::error::iOS SDK $SDK 过低（需要 18+），机器池不对"
+            exit 1
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -68,20 +52,6 @@ jobs:
 
       - name: Install JS dependencies
         run: npm ci
-
-      - name: Relax Swift 6 concurrency in expo-modules-jsi
-        run: |
-          set -euo pipefail
-          # expo-modules-jsi 的 Package.swift 声明 swiftLanguageModes: [.v6]，
-          # 在 Xcode 26 的 Swift 6.2 下，JavaScriptObject.swift 里那句
-          # `nonisolated(unsafe) let slot` 会被判定成 "sending 'slot' risks causing data races"，
-          # 直接编译失败（库本身的写法问题，不是我们的代码）。
-          # 降到 Swift 5 语言模式后，这条诊断只是警告，产物不受影响。
-          F=node_modules/expo-modules-jsi/apple/Package.swift
-          grep -n "swiftLanguageModes" "$F"
-          sed -i '' 's/swiftLanguageModes: \[\.v6\]/swiftLanguageModes: [.v5]/' "$F"
-          grep -n "swiftLanguageModes" "$F"
-          ! grep -q "swiftLanguageModes: \[.v6\]" "$F"
 
       - name: Generate native iOS project
         run: npx expo prebuild --platform ios --clean
@@ -105,8 +75,6 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            SWIFT_VERSION=5.0 \
-            SWIFT_STRICT_CONCURRENCY=minimal \
             build
 
       - name: Package unsigned IPA
