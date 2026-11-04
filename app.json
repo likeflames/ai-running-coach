@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "AI跑步教练",
+    "slug": "ai-running-coach",
+    "owner": "likeflames",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "runningcoach",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0f1115",
+    "splash": {
+      "backgroundColor": "#0f1115",
+      "resizeMode": "contain",
+      "image": "./assets/splash-icon.png"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.likeflames.runningcoach",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.likeflames.runningcoach",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f1115",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "90a70aaa-f4d7-467a-91f8-b7846a8ed8ad"
+      }
+    }
+  }
+}
