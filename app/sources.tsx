@@ -2,7 +2,6 @@ import React from 'react';
 import { View, Text, Alert, Linking, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { api } from '../src/api';
-import { API_CANDIDATES } from '../src/config';
 import { Screen, Card, Loading, ErrorBox, Pill, Btn, Hint, Field } from '../src/ui';
 import { S, T, type Theme } from '../src/theme';
 import { makeStyles, useTheme } from '../src/theme-provider';
@@ -36,9 +35,6 @@ const CAP: Record<string, string> = {
   activity: '训练',
   push: '推送课表',
 };
-
-/** Safari 里选文件上传，不需要给 App 加原生文件选择器 */
-const IMPORT_URL = `${API_CANDIDATES[0]}/static/oura-import.html`;
 
 export default function SourcesScreen() {
   const t = useTheme();
@@ -294,21 +290,6 @@ export default function SourcesScreen() {
         </Card>
       ))}
 
-      <Card style={{ marginBottom: S.md }}>
-        <View style={s.titleRow}>
-          <Text style={s.name}>离线导入 Oura 数据</Text>
-          <Pill text="无需授权" color={t.good} />
-        </View>
-        <Text style={s.sub}>上传会员中心导出的 ZIP，补进睡眠 / HRV / 准备度</Text>
-        <Text style={s.note}>
-          不经过 Oura API，也不用开发者应用或会员资格。在 Safari 里选文件、先检查再确认导入，
-          重复的数据会自动跳过。
-        </Text>
-        <View style={s.actions}>
-          <Btn title="打开导入页" onPress={() => Linking.openURL(IMPORT_URL)} primary small />
-        </View>
-      </Card>
-
       <Hint label="为什么 Oura 不能当主数据源？">
         Oura 戒指没有 GPS，只能给出睡眠、HRV、准备度和「运动时长」，跑步的距离是手机在旁边时估出来的，
         经常是空的，更没有每公里配速。所以用它补恢复数据很准，跑量还得靠佳明或 Strava。
@@ -322,9 +303,6 @@ export default function SourcesScreen() {
         走 API 自动同步时：注册应用的开发者账号只要普通 Oura 账号（免费、不用会员）；
         被读取数据的那个人（OAuth 授权方）如果用 Gen3/Gen4 戒指，必须有有效会员，
         Gen2 老戒指不受影响。自建应用默认 10 个用户以内不用审核。
-        {'\n\n'}
-        但 Oura 的 API 协议禁止把通过 API 取得的数据提供给大模型（包括拼进 prompt 生成建议）。
-        所以要把恢复数据喂给 AI 教练、或者发给别人用，走上面的「离线导入」更稳妥。
       </Hint>
 
       <Hint label="多人共用的前提">
