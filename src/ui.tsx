@@ -456,9 +456,37 @@ export function Hint({
   );
 }
 
-/** 细分割线 */
-export function Divider({ inset = 0 }: { inset?: number }) {
+/**
+ * 进度条。
+ *
+ * 大模型没法给出真实百分比（谁也不知道还要写多久），这里用的是
+ * 「估算进度」：按预计耗时长到 92%，真正完成时再补到 100%。
+ * 关键是永远不要停在 99% —— 那比没有进度条更让人焦虑。
+ */
+export function Progress({
+  value,
+  height = 4,
+}: {
+  value: Animated.Value;
+  height?: number;
+}) {
   const t = useTheme();
+  return (
+    <View style={{ height, borderRadius: height / 2, backgroundColor: t.cardInner, overflow: 'hidden' }}>
+      <Animated.View
+        style={{
+          height,
+          borderRadius: height / 2,
+          backgroundColor: t.accent,
+          width: value.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+        }}
+      />
+    </View>
+  );
+}
+
+/** 细分割线 */
+export function Divider({ inset = 0 }: { inset?: number }) {  const t = useTheme();
   return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.border, marginLeft: inset }} />;
 }
 

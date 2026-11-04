@@ -292,11 +292,12 @@ export interface ChatEvent {
  * 单地址 SSE 请求。用 XMLHttpRequest 而不是 fetch：
  * React Native 的 fetch 不支持读取流，XHR 的 responseText 会随进度增长。
  */
-function streamOnce(
+function sseOnce(
   base: string,
-  message: string,
-  history: { role: string; content: string }[],
-  onEvent: (ev: ChatEvent) => void
+  path: string,
+  form: FormData | null,
+  onEvent: (ev: ChatEvent) => void,
+  timeoutMs = 300000
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -339,10 +340,10 @@ function streamOnce(
       reject(err);
     };
 
-    xhr.open('POST', `${base}/api/chat/stream`);
+    xhr.open(form ? 'POST' : 'GET', `${base}${path}`);
     xhr.setRequestHeader('Accept', 'text/event-stream');
     if (accessToken) xhr.setRequestHeader('X-RC-Token', accessToken);
-    xhr.timeout = 300000;
+    xhr.timeout = timeoutMs;
     xhr.onprogress = flush;
     xhr.onload = () => {
       flush();
@@ -366,11 +367,57 @@ function streamOnce(
     xhr.ontimeout = () => fail('请求超时');
     xhr.onabort = () => fail('已取消');
 
-    const fd = new FormData();
-    fd.append('message', message);
-    fd.append('history', JSON.stringify(history || []));
-    xhr.send(fd as any);
+    xhr.send((form as any) || null);
   });
+}
+
+/** 流式对话用：POST 表单到 /api/chat/stream */
+function streamOnce(
+  base: string,
+  message: string,
+  history: { role: string; content: string }[],
+  onEvent: (ev: ChatEvent) => void
+): Promise<void> {
+  const fd = new FormData();
+  fd.append('message', message);
+  fd.append('history', JSON.stringify(history || []));
+  return sseOnce(base, '/api/chat/stream', fd, onEvent);
+}
+
+/**
+ * 今日训练建议（流式）。后端生成一次要 30–40 秒，
+ * 一次性请求在手机上必然超时，改成边生成边显示。
+ * fresh=true 让服务端跳过当天缓存、重新生成。
+ */
+export async function adviceStream(
+  onEvent: (ev: ChatEvent) => void,
+  fresh = false,
+  retried = false
+): Promise<void> {
+  await ready;
+  const bases = orderedBases();
+  const path = fresh ? '/api/daily-advice/stream?fresh=1' : '/api/daily-advice/stream';
+  let lastError: Error | null = null;
+
+  for (const base of bases) {
+    try {
+      await sseOnce(base, path, null, onEvent, 180000);
+      return;
+    } catch (e: any) {
+      if (e?.started) throw e;
+      if (e?.status === 401 && askTokenHandler && !retried) {
+        const t = await askTokenHandler();
+        if (t) {
+          await setAccessToken(t);
+          return adviceStream(onEvent, fresh, true);
+        }
+        throw new Error('需要访问口令，请在设置里填写');
+      }
+      lastError = new Error(e?.message || '网络错误');
+    }
+  }
+
+  throw lastError || new Error('无法连接服务器');
 }
 
 /**

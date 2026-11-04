@@ -14,6 +14,7 @@ import {
   Easing,
 } from 'react-native';
 import { api, chatStream, ChatEvent } from '../../../src/api';
+import { Markdown } from '../../../src/markdown';
 import { Glass } from '../../../src/glass';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { S, R, T, TNUM, alpha, type Theme } from '../../../src/theme';
@@ -54,7 +55,12 @@ export default function ChatScreen() {
   // 键盘弹起时输入栏贴着键盘，平时要让开底部的系统标签栏
   const [kbd, setKbd] = React.useState(false);
   React.useEffect(() => {
-    const a = Keyboard.addListener('keyboardWillShow', () => setKbd(true));
+    const a = Keyboard.addListener('keyboardWillShow', () => {
+      setKbd(true);
+      // 键盘把列表压矮后底部内容会被裁掉，跟着贴一次底
+      follow.current = true;
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 80);
+    });
     const b = Keyboard.addListener('keyboardWillHide', () => setKbd(false));
     return () => {
       a.remove();
@@ -73,6 +79,8 @@ export default function ChatScreen() {
   const lastPush = React.useRef(0);
   /** 用户是否停在底部。滑上去看历史时就别再抢滚动位置 */
   const follow = React.useRef(true);
+  /** 手指是否正按在列表上（只有这种情况才更新 follow） */
+  const touching = React.useRef(false);
 
   const listRef = React.useRef<FlatList<Msg>>(null);
   const [meta, setMeta] = React.useState<{
@@ -158,6 +166,11 @@ export default function ChatScreen() {
     lastPush.current = 0;
     follow.current = true;
     push(true);
+    // 刚发出消息：等两帧再贴底，确保新气泡已经量完高度
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated: false });
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
+    });
 
     let gotAny = false;
     try {
@@ -236,17 +249,45 @@ export default function ChatScreen() {
         keyboardShouldPersistTaps="handled"
         scrollEventThrottle={32}
         /*
-         * 抖动的主因在这里：原来每次内容长高都调 scrollToEnd({ animated: true })，
+         * 贴底用非动画：原来每次内容长高都调 scrollToEnd({ animated: true })，
          * 上一个动画还没跑完下一个又来了，几个动画抢同一个滚动位置，看着就是一抖一抖。
-         * 改成非动画贴底 —— 它永远和内容同步，反而平滑。
+         *
+         * 补两帧是因为内容刚插进去时高度还没测量完，滚一次会停在旧位置 ——
+         * 表现就是「发完消息直接跳回上面」。
          */
         onContentSizeChange={() => {
-          if (follow.current) listRef.current?.scrollToEnd({ animated: false });
+          if (!follow.current) return;
+          listRef.current?.scrollToEnd({ animated: false });
+          requestAnimationFrame(() => {
+            if (follow.current) listRef.current?.scrollToEnd({ animated: false });
+          });
         }}
+        onScrollBeginDrag={() => {
+          touching.current = true;
+        }}
+        onMomentumScrollBegin={() => {
+          touching.current = true;
+        }}
+        /*
+         * 只有「手指拖动」才算用户想离开底部。
+         * 键盘弹起会把列表压矮，这时候 onScroll 也会触发，
+         * 旧写法会被误判成"用户滑走了"，之后就再也不跟随 —— 这才是跳顶部的根因。
+         */
         onScroll={(e) => {
+          if (!touching.current) return;
           const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
           const gap = contentSize.height - contentOffset.y - layoutMeasurement.height;
           follow.current = gap < 120;
+        }}
+        onScrollEndDrag={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          follow.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 120;
+          touching.current = false;
+        }}
+        onMomentumScrollEnd={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          follow.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 120;
+          touching.current = false;
         }}
         ListHeaderComponent={
           <View>
@@ -357,7 +398,7 @@ const Bubble = React.memo(function Bubble({
       {item.tool ? <Text style={s.toolChip}>{item.tool}</Text> : null}
 
       {item.text ? (
-        <Text style={s.bubbleText}>{item.text}</Text>
+        <Markdown text={item.text} />
       ) : streaming ? (
         <View style={s.thinkingRow}>
           <ActivityIndicator size="small" color={t.accent} />
@@ -399,7 +440,7 @@ function ThinkBlock({ text, open, onToggle }: { text: string; open: boolean; onT
       </Pressable>
       {open ? (
         <View style={s.thinkBox}>
-          <Text style={s.thinkText}>{text}</Text>
+          <Markdown text={text} compact />
         </View>
       ) : null}
     </View>

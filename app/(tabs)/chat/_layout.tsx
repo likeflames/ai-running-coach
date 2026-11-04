@@ -1,12 +1,12 @@
 import React from 'react';
 import { Stack } from 'expo-router';
-import { largeTitleOptions } from '../../../src/nav';
+import { solidHeaderOptions } from '../../../src/nav';
 import { useTheme } from '../../../src/theme-provider';
 
 export default function ChatLayout() {
   const t = useTheme();
   return (
-    <Stack screenOptions={largeTitleOptions(t)}>
+    <Stack screenOptions={solidHeaderOptions(t)}>
       <Stack.Screen name="index" options={{ title: '对话' }} />
     </Stack>
   );

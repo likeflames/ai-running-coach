@@ -1,8 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator, Switch, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Alert, ActivityIndicator, Switch, Pressable, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import { api, StatusResp, RecentActivity } from '../../../src/api';
+import { api, adviceStream, StatusResp, RecentActivity } from '../../../src/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Markdown } from '../../../src/markdown';
 import {
   Screen,
   Card,
@@ -18,6 +20,7 @@ import {
   Segmented,
   ColorDots,
   Divider,
+  Progress,
 } from '../../../src/ui';
 import {
   S,
@@ -157,15 +160,96 @@ export default function TodayScreen() {
     }
   };
 
-  const loadAdvice = async () => {
+  const adviceKey = React.useMemo(() => `rc.advice.${new Date().toISOString().slice(0, 10)}`, []);
+  /** 流式累积用 ref，避免每个 token 都触发整页重渲染 */
+  const adviceBuf = React.useRef('');
+  const advicePush = React.useRef(0);
+  /** 模型的思考字数：正文出来前用来告诉用户"还在思考"，而不是干等 */
+  const [adviceThink, setAdviceThink] = React.useState(0);
+  /** 估算进度条：模型给不出真实百分比，按预计耗时长到 92%，完成时补满 */
+  const adviceProg = React.useRef(new Animated.Value(0)).current;
+
+  /** 打开时先显示今天已经生成过的那份，不用每次都等 40 秒 */
+  React.useEffect(() => {
+    AsyncStorage.getItem(adviceKey)
+      .then((v) => {
+        if (v) setAdvice(v);
+      })
+      .catch(() => {});
+  }, [adviceKey]);
+
+  /**
+   * 生成今日建议。
+   *
+   * 后端生成一次要 30–40 秒（实测 38.7s），一次性请求必然被超时打断，
+   * 所以改成 SSE 流式：文字一段段出现，等待感完全不同。
+   */
+  const loadAdvice = async (fresh = false) => {
+    if (adviceLoading) return;
     setAdviceLoading(true);
     setAdviceErr(null);
+    setAdvice('');
+    adviceBuf.current = '';
+    advicePush.current = 0;
+    setAdviceThink(0);
+
+    // 进度条先动起来。75 秒到 92%，剩下的等真正完成时再补 —— 宁可在 92% 待久一点，
+    // 也不要卡在 99% 假装快好了。
+    adviceProg.setValue(0.05);
+    Animated.timing(adviceProg, {
+      toValue: 0.92,
+      duration: 75000,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: false,
+    }).start();
+
+    let failed = '';
+    let think = 0;
+    let reported = 0;
     try {
-      const d = await api.get<{ advice: string }>('/api/daily-advice');
-      setAdvice(d.advice);
+      await adviceStream((ev) => {
+        if (ev.t === 'content') {
+          adviceBuf.current += ev.d || '';
+          const now = Date.now();
+          if (now - advicePush.current > 120) {
+            advicePush.current = now;
+            setAdvice(adviceBuf.current);
+          }
+        } else if (ev.t === 'reasoning') {
+          // 思考阶段正文还是空的，只报个字数，让人知道没卡住
+          think += (ev.d || '').length;
+          if (!adviceBuf.current && think - reported > 120) {
+            reported = think;
+            setAdviceThink(think);
+          }
+        } else if (ev.t === 'error') {
+          failed = ev.d || '生成失败';
+        }
+      }, fresh);
+
+      const text = adviceBuf.current;
+      if (failed) {
+        setAdvice('');
+        setAdviceErr(failed);
+      } else if (!text.trim()) {
+        setAdvice('');
+        setAdviceErr('模型这次没有返回内容，再试一次');
+      } else {
+        setAdvice(text);
+        AsyncStorage.setItem(adviceKey, text).catch(() => {});
+      }
     } catch (e: any) {
-      setAdviceErr(e?.message || '未知错误');
+      const partial = adviceBuf.current;
+      if (partial.trim()) {
+        // 已经显示了一部分：保留，并提示可能不完整
+        setAdvice(partial);
+        setAdviceErr('输出中断：' + (e?.message || '连接断开'));
+      } else {
+        setAdvice('');
+        setAdviceErr(e?.message || '未知错误');
+      }
     } finally {
+      Animated.timing(adviceProg, { toValue: 1, duration: 260, useNativeDriver: false }).start();
       setAdviceLoading(false);
     }
   };
@@ -372,34 +456,44 @@ export default function TodayScreen() {
         <Card>
           {advice ? (
             <>
-              <Text style={s.adviceBody}>{advice}</Text>
-              <Pressable onPress={loadAdvice} disabled={adviceLoading} hitSlop={10} style={{ marginTop: S.md }}>
-                <Text style={s.adviceRegen}>{adviceLoading ? '重新生成中…' : '重新生成'}</Text>
-              </Pressable>
+              <Markdown text={advice} />
+              {adviceLoading ? (
+                <View style={{ marginTop: S.md }}>
+                  <Progress value={adviceProg} height={4} />
+                  <Text style={[s.adviceRegen, { marginTop: S.sm }]}>正在生成…</Text>
+                </View>
+              ) : null}
+              {adviceErr ? <Text style={[s.adviceErrBody, { marginTop: S.sm }]}>{adviceErr}</Text> : null}
+              {!adviceLoading ? (
+                <Pressable onPress={() => loadAdvice(true)} hitSlop={10} style={{ marginTop: S.md }}>
+                  <Text style={s.adviceRegen}>重新生成</Text>
+                </Pressable>
+              ) : null}
             </>
+          ) : adviceLoading ? (
+            <View style={{ paddingVertical: S.md }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.sm, marginBottom: S.md }}>
+                <ActivityIndicator size="small" color={t.accent} />
+                <Text style={s.adviceRegen}>
+                  {adviceThink > 0 ? `教练正在思考（已 ${adviceThink} 字）` : '正在读取数据…'}
+                </Text>
+              </View>
+              <Progress value={adviceProg} height={5} />
+              <Text style={[s.adviceHint, { marginTop: S.md }]}>想完会一段段写出来，不用一直盯着</Text>
+            </View>
           ) : adviceErr ? (
             <View style={{ alignItems: 'flex-start' }}>
               <Text style={s.adviceErrTitle}>这次没拿到建议</Text>
               <Text style={s.adviceErrBody}>{adviceErr}</Text>
               <View style={{ marginTop: S.md, alignSelf: 'stretch' }}>
-                <Btn
-                  title={adviceLoading ? '重试中…' : '重试'}
-                  onPress={loadAdvice}
-                  disabled={adviceLoading}
-                  primary
-                />
+                <Btn title="重试" onPress={() => loadAdvice()} primary />
               </View>
             </View>
           ) : (
             <View style={{ alignItems: 'flex-start' }}>
               <Text style={s.adviceHint}>结合恢复数据、体能与计划，生成今天该怎么练</Text>
               <View style={{ marginTop: S.md, alignSelf: 'stretch' }}>
-                <Btn
-                  title={adviceLoading ? '生成中…' : '生成今日建议'}
-                  onPress={loadAdvice}
-                  disabled={adviceLoading}
-                  primary
-                />
+                <Btn title="生成今日建议" onPress={() => loadAdvice()} primary />
               </View>
             </View>
           )}
@@ -483,6 +577,7 @@ const useStyles = makeStyles((t: Theme) => ({
   adviceReason: { color: t.text2, fontSize: T.body2, lineHeight: 21, marginTop: S.sm - 2 },
   adviceFoot: { color: t.text3, fontSize: T.micro, marginTop: S.sm, lineHeight: 17 },
   adviceBody: { color: t.text, fontSize: T.body2, lineHeight: 24 },
+  adviceStreaming: { flexDirection: 'row', alignItems: 'center', gap: S.sm, marginTop: S.md },
   adviceHint: { color: t.text2, fontSize: T.body2, lineHeight: 21 },
   adviceRegen: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
   adviceErrTitle: { color: t.text, fontSize: T.body2, fontWeight: '600', marginBottom: 4 },

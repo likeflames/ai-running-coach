@@ -1,9 +1,9 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { api } from '../../../src/api';
-import { Screen, Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat, Pill } from '../../../src/ui';
-import { Sparkline } from '../../../src/charts';
-import { S, T, R, TNUM, alpha, type Theme } from '../../../src/theme';
+import { Screen, Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat, Pill, Hint } from '../../../src/ui';
+import { Legend, LineChart } from '../../../src/charts';
+import { S, T, R, TNUM, alpha, tsbColor, type Theme } from '../../../src/theme';
 import { makeStyles, useTheme } from '../../../src/theme-provider';
 import { F } from '../../../src/format';
 import { SCENARIO, zh } from '../../../src/labels';
@@ -55,6 +55,9 @@ export default function RaceScreen() {
     // 仅随距离/策略变化重新计算
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [distance, strategy]);
+
+  /** 预测曲线：后台按天给出，最后一天就是比赛日 */
+  const fc: any[] = forecast?.series || [];
 
   return (
     <Screen>
@@ -150,20 +153,63 @@ export default function RaceScreen() {
               <Card>
                 <View style={s.statRow}>
                   <Stat label="距比赛" value={forecast.days_until_race} unit="天" />
-                  <Stat label="比赛日状态" value={F.num(forecast.race_day?.form, 1)} />
+                  <Stat
+                    label="比赛日状态"
+                    value={F.num(forecast.race_day?.form, 1)}
+                    color={tsbColor(t, Number(forecast.race_day?.form ?? 0))}
+                  />
                   <Stat label="最高疲劳" value={F.num(forecast.peak_fatigue?.fatigue, 1)} />
                 </View>
-                <Text style={[s.meta, { marginBottom: 4, marginTop: S.md }]}>体能 / 疲劳走势</Text>
-                <Sparkline values={(forecast.series || []).map((p: any) => p.fitness)} color={t.accent} height={85} />
-                <View style={{ height: S.sm }} />
-                <Sparkline
-                  values={(forecast.series || []).map((p: any) => p.fatigue)}
-                  color={t.warn}
-                  height={65}
-                  area={false}
+
+                <View style={s.chartHead}>
+                  <Text style={s.chartTitle}>体能 / 疲劳走势</Text>
+                  <Text style={s.chartSpan}>
+                    {fc.length ? `${F.dayShort(fc[0].date)} – ${F.dayShort(fc[fc.length - 1].date)}` : ''}
+                  </Text>
+                </View>
+
+                <LineChart
+                  height={168}
+                  yTicks={3}
+                  series={[
+                    { values: fc.map((p: any) => p.fitness), color: t.accent, label: '体能', area: true },
+                    { values: fc.map((p: any) => p.fatigue), color: t.warn, label: '疲劳' },
+                  ]}
+                  labels={fc.map((p: any) => F.dayShort(p.date))}
                 />
+
+                <Legend
+                  items={[
+                    { color: t.accent, label: '体能 · 长期积累' },
+                    { color: t.warn, label: '疲劳 · 短期负担' },
+                  ]}
+                />
+
+                <Hint label="这张图怎么看">
+                  <Text>
+                    横轴是日期，纵轴是负荷点数。两条线共用同一把尺子，所以能直接比高低。
+                    {'\n\n'}
+                    <Text style={{ color: t.accent }}>绿线是体能</Text>
+                    ，靠日积月累，涨得慢、掉得也慢；
+                    <Text style={{ color: t.warn }}>橙线是疲劳</Text>
+                    ，跑一次就冲高，休息几天就掉下来。
+                    {'\n\n'}
+                    平时训练理想的样子是：绿线缓慢往上爬，橙线在它下方起起伏伏。
+                    橙线窜到绿线上方，说明最近练得比底子扛得住的更多，该收一收了。
+                    {'\n\n'}
+                    比赛日绿色在上、橙色回落，就是身体把训练攒下来的东西兑现出来的时刻。
+                  </Text>
+                </Hint>
+
                 <Text style={[s.meta, { marginTop: S.md, lineHeight: 20 }]}>{forecast.advice}</Text>
-                <Text style={[s.meta, { marginTop: 5 }]}>{forecast.model_note}</Text>
+                {forecast.peak_fatigue?.date ? (
+                  <Text style={[s.meta, { marginTop: 5 }]}>
+                    最疲劳出现在 {forecast.peak_fatigue.date}，之后随赛前减量回落
+                  </Text>
+                ) : null}
+                <Text style={[s.meta, { marginTop: 5 }]}>
+                  算法：体能按 42 天长周期、疲劳按 7 天短周期做指数平滑，与 TrainingPeaks 一致
+                </Text>
               </Card>
             </Section>
           ) : null}
@@ -212,6 +258,15 @@ const useStyles = makeStyles((t: Theme) => ({
     ...TNUM,
   },
   meta: { color: t.text3, fontSize: T.micro + 1, lineHeight: 18 },
+  chartHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginTop: S.lg,
+    marginBottom: S.sm,
+  },
+  chartTitle: { color: t.text, fontSize: T.body2, fontWeight: '600' },
+  chartSpan: { color: t.text3, fontSize: T.micro + 1, ...TNUM },
   statRow: { flexDirection: 'row', gap: S.sm },
   split: {
     flexDirection: 'row',
