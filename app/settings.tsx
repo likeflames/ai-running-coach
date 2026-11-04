@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { api, authApi, logout, setAccessToken } from '../src/api';
 import { Screen, Section, List, ListRow, Card, Segmented, ColorDots, Btn, Divider } from '../src/ui';
 import { S, T, ACCENTS, ACCENT_LIST, type Theme, type Appearance, type AccentId } from '../src/theme';
@@ -126,7 +127,7 @@ export default function SettingsScreen() {
           />
           <ListRow
             title="数据源"
-            sub="佳明、Oura"
+            sub="佳明、Oura、苹果健康"
             onPress={() => router.push('/sources')}
             chevron
           />
@@ -233,7 +234,9 @@ export default function SettingsScreen() {
           </Text>
           <View style={{ height: S.md }} />
           <Divider />
-          <Text style={[s.version, { color: t.text3 }]}>AI 跑步教练 · 1.0.0</Text>
+          <Text style={[s.version, { color: t.text3 }]}>
+            AI 跑步教练 · {Constants.expoConfig?.version ?? '1.0.0'}
+          </Text>
         </Card>
       </Section>
     </Screen>

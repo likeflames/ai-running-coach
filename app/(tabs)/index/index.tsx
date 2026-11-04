@@ -181,7 +181,7 @@ export default function TodayScreen() {
         <Card>
           <Text style={[s.emptyTitle, { color: t.text }]}>先把数据接上</Text>
           <Text style={[s.emptyBody, { color: t.text2 }]}>
-            完善个人资料、连接佳明或 Oura，之后这里会显示每天的恢复状态和训练建议。
+            完善个人资料，再接上佳明、苹果健康或 Oura，之后这里会显示每天的恢复状态和训练建议。
           </Text>
           <View style={{ height: S.md }} />
           <Btn title="完善个人资料" onPress={() => router.push('/profile')} primary />
