@@ -1,11 +1,39 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator, Switch } from 'react-native';
+import { View, Text, StyleSheet, Alert, ActivityIndicator, Switch, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import { api, StatusResp, RecentActivity } from '../../../src/api';
-import { Screen, Card, Section, Stat, Row, Btn, Loading, ErrorBox, Empty, Pill } from '../../../src/ui';
-import { Sparkline } from '../../../src/charts';
-import { C, S, levelColor, tsbColor } from '../../../src/theme';
+import {
+  Screen,
+  Card,
+  Section,
+  Stat,
+  Btn,
+  Loading,
+  ErrorBox,
+  Empty,
+  Pill,
+  List,
+  ListRow,
+  Segmented,
+  ColorDots,
+  Divider,
+} from '../../../src/ui';
+import {
+  S,
+  T,
+  TNUM,
+  ACCENTS,
+  ACCENT_LIST,
+  alpha,
+  levelColor,
+  tsbColor,
+  recoveryColor,
+  type Theme,
+  type Appearance,
+  type AccentId,
+} from '../../../src/theme';
+import { makeStyles, useTheme, useThemeControl } from '../../../src/theme-provider';
 import { F } from '../../../src/format';
 import { ACTIVITY_TYPE, zh } from '../../../src/labels';
 import { getReminderSettings, setReminderEnabled, ReminderSettings } from '../../../src/notify';
@@ -19,6 +47,8 @@ const TIME_PRESETS = [
 ];
 
 export default function TodayScreen() {
+  const t = useTheme();
+  const s = useStyles();
   const router = useRouter();
   const [data, setData] = React.useState<StatusResp | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
@@ -47,12 +77,8 @@ export default function TodayScreen() {
         return;
       }
       setRem({ ...rem, enabled: on });
-      if (on) {
-        if (r.scheduled) {
-          Alert.alert('已开启', `未来 ${r.scheduled} 天的提醒都排好了。\n每周打开一次 App 会自动往后补。`);
-        } else {
-          Alert.alert('开关已打开', r.error ? `这次没排上：${r.error}\n联网后打开 App 会自动补。` : '联网后打开 App 会自动排上。');
-        }
+      if (on && r.scheduled) {
+        Alert.alert('已开启', `未来 ${r.scheduled} 天的提醒都排好了。\n每周打开一次 App 会自动往后补。`);
       }
     } catch (e: any) {
       Alert.alert('设置失败', e?.message || '未知错误');
@@ -141,155 +167,218 @@ export default function TodayScreen() {
   };
 
   if (loading) return <Loading />;
-  if (err && !data) return <Screen><ErrorBox message={err} onRetry={() => load()} /></Screen>;
+  if (err && !data)
+    return (
+      <Screen>
+        <ErrorBox message={err} onRetry={() => load()} />
+      </Screen>
+    );
   if (!data) return null;
 
   const rec = data.recovery || ({} as any);
   const adv = data.recovery_advice || ({} as any);
   const fit = data.fitness || ({} as any);
+  const sleepScore = Number(rec.sleep_score) || 0;
+  const recColor = recoveryColor(t, sleepScore);
+  const remKey = `${rem.hour}:${rem.minute}`;
 
   return (
     <Screen refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }}>
-      {/* 恢复状态 */}
+      {/* ---------- 恢复 ---------- */}
       <Card>
-        <View style={styles.cardHead}>
-          <Text style={styles.cardTitle}>恢复状态</Text>
-          <Text style={styles.dateText}>{rec.date || F.today()}</Text>
+        <View style={s.cardTop}>
+          <Text style={s.eyebrow}>睡眠评分</Text>
+          <Text style={s.cardDate}>{rec.date || F.today()}</Text>
         </View>
-        <View style={styles.statRow}>
-          <Stat label="睡眠评分" value={F.num(rec.sleep_score)} />
-          <Stat label="心率变异性" value={F.num(rec.hrv)} unit="毫秒" />
-          <Stat
-            label="身体电量"
-            value={rec.body_battery ? `${Math.round(rec.body_battery)}%` : '-'}
-            color={
-              Number(rec.body_battery) > 70 ? C.good : Number(rec.body_battery) > 40 ? C.warn : C.bad
-            }
+
+        <View style={s.heroRow}>
+          <Text style={[s.heroNum, { color: recColor }]}>
+            {rec.sleep_score ? F.num(rec.sleep_score) : '–'}
+          </Text>
+          <Text style={[s.heroNote, { color: recColor }]}>
+            {sleepScore >= 80 ? '恢复不错' : sleepScore >= 60 ? '还算够用' : sleepScore > 0 ? '偏低了' : '暂无数据'}
+          </Text>
+        </View>
+
+        <View style={[s.track, { backgroundColor: t.cardInner }]}>
+          <View
+            style={{
+              width: `${Math.max(2, Math.min(100, sleepScore))}%`,
+              height: '100%',
+              borderRadius: 5,
+              backgroundColor: recColor,
+            }}
           />
         </View>
-        <View style={styles.statRow}>
-          <Stat label="静息心率" value={F.num(rec.resting_hr)} unit="次/分" />
-          <Stat label="压力均值" value={F.num(rec.stress_avg)} />
-          <Stat label="睡眠时长" value={rec.sleep_minutes ? F.duration(rec.sleep_minutes) : '-'} />
+
+        <View style={{ marginTop: S.md }}>
+          <Divider />
+          <View style={[s.statRow, { marginTop: S.md - 2 }]}>
+            <Stat label="心率变异性" value={F.num(rec.hrv)} unit="ms" />
+            <Stat
+              label="身体电量"
+              value={rec.body_battery ? `${Math.round(rec.body_battery)}%` : '-'}
+              color={
+                Number(rec.body_battery) > 70 ? t.good : Number(rec.body_battery) > 40 ? t.warn : t.bad
+              }
+            />
+            <Stat label="静息心率" value={F.num(rec.resting_hr)} unit="bpm" />
+          </View>
+          <View style={[s.statRow, { marginTop: S.md }]}>
+            <Stat label="压力均值" value={F.num(rec.stress_avg)} />
+            <Stat label="睡眠时长" value={rec.sleep_minutes ? F.duration(rec.sleep_minutes) : '-'} />
+            <View style={{ flex: 1, minWidth: 70 }} />
+          </View>
         </View>
       </Card>
 
-      {/* 今日建议 */}
-      <Card style={{ borderColor: levelColor(adv.level) + '55' }}>
-        <View style={styles.cardHead}>
-          <Text style={styles.cardTitle}>今日建议</Text>
-          {adv.level ? <Pill text={['休息', '轻松', '按计划', '可加量'][adv.level - 1] || ''} color={levelColor(adv.level)} /> : null}
+      {/* ---------- 今日建议 ---------- */}
+      <Card tint={adv.level ? levelColor(t, adv.level) : undefined}>
+        <View style={s.cardTop}>
+          <Text style={s.eyebrow}>今日建议</Text>
+          {adv.level ? (
+            <Pill text={['休息', '轻松', '按计划', '可加量'][adv.level - 1] || ''} color={levelColor(t, adv.level)} />
+          ) : null}
         </View>
-        <Text style={{ color: levelColor(adv.level), fontSize: 17, fontWeight: '600', marginBottom: 4 }}>
-          {adv.advice || '-'}
-        </Text>
-        <Text style={{ color: C.text2, fontSize: 12, lineHeight: 18 }}>{adv.reason || ''}</Text>
+        <Text style={[s.adviceText, { color: levelColor(t, adv.level) }]}>{adv.advice || '-'}</Text>
+        {adv.reason ? <Text style={s.adviceReason}>{adv.reason}</Text> : null}
         {adv.hrv_normal_range ? (
-          <Text style={{ color: C.text3, fontSize: 11, marginTop: 6 }}>
-            心率变异周均 {F.num(adv.hrv_week_avg, 1)}（正常区间 {adv.hrv_normal_range[0]}–{adv.hrv_normal_range[1]}，偏离度 {F.num(adv.z_score, 2)}）
+          <Text style={s.adviceFoot}>
+            心率变异周均 {F.num(adv.hrv_week_avg, 1)}（正常 {adv.hrv_normal_range[0]}–{adv.hrv_normal_range[1]}，偏离 {F.num(adv.z_score, 2)}）
           </Text>
         ) : null}
       </Card>
 
-      {/* 体能状态 */}
+      {/* ---------- 体能状态 ---------- */}
       <Card>
-        <View style={styles.cardHead}>
-          <Text style={styles.cardTitle}>体能状态</Text>
-          <Pill text={fit.status || '-'} color={tsbColor(fit.tsb || 0)} />
+        <View style={s.cardTop}>
+          <Text style={s.eyebrow}>体能状态</Text>
+          <Pill text={fit.status || '-'} color={tsbColor(t, fit.tsb || 0)} />
         </View>
-        <View style={styles.statRow}>
+        <View style={[s.statRow, { marginTop: S.sm }]}>
           <Stat label="体能储备" value={F.num(fit.ctl, 1)} />
           <Stat label="近期疲劳" value={F.num(fit.atl, 1)} />
-          <Stat label="当前状态" value={F.num(fit.tsb, 1)} color={tsbColor(fit.tsb || 0)} />
+          <Stat label="当前状态" value={F.num(fit.tsb, 1)} color={tsbColor(t, fit.tsb || 0)} />
         </View>
-        <View style={styles.statRow}>
+        <View style={[s.statRow, { marginTop: S.md }]}>
           <Stat label="本周跑量" value={F.num(fit.weekly_km, 1)} unit="公里" />
-          <Stat label="负荷比" value={F.num(fit.acwr_ratio, 2)} color={fit.acwr_ratio > 1.5 ? C.bad : fit.acwr_ratio > 1.3 ? C.warn : C.good} />
+          <Stat
+            label="负荷比"
+            value={F.num(fit.acwr_ratio, 2)}
+            color={fit.acwr_ratio > 1.5 ? t.bad : fit.acwr_ratio > 1.3 ? t.warn : t.good}
+          />
+          <View style={{ flex: 1, minWidth: 70 }} />
         </View>
       </Card>
 
-      {/* 最近训练 */}
-      <Section title="最近训练" right={<Btn title="全部" small onPress={() => router.push('/activities')} />}>
+      {/* ---------- 最近训练 ---------- */}
+      <Section
+        title="最近训练"
+        right={
+          <Pressable onPress={() => router.push('/activities')} hitSlop={8}>
+            <Text style={[s.link, { color: t.accent }]}>全部</Text>
+          </Pressable>
+        }
+      >
         {data.recent_activities?.length ? (
-          <Card style={{ padding: 0 }}>
+          <List>
             {data.recent_activities.map((a, i) => (
-              <ActivityRow key={i} a={a} last={i === data.recent_activities.length - 1} />
+              <ActivityRow key={i} a={a} />
             ))}
-          </Card>
+          </List>
         ) : (
           <Empty text="暂无训练记录，上传 .fit 文件或同步佳明" />
         )}
       </Section>
 
-      {/* 操作 */}
-      <Section title="数据">
-        <View style={{ flexDirection: 'row', gap: S.sm, flexWrap: 'wrap' }}>
-          <Btn title={syncing === '增量' ? '同步中…' : '同步佳明'} onPress={() => onSync(false)} disabled={!!syncing} />
-          <Btn title={syncing === '全量' ? '拉取中…' : '全量历史'} onPress={() => onSync(true)} disabled={!!syncing} />
-          <Btn title={syncing === '上传' ? '解析中…' : '上传 .fit'} onPress={onUpload} disabled={!!syncing} color={C.purple} />
-        </View>
-      </Section>
-
-      {/* 每日提醒 */}
-      <Section title="每日提醒">
-        <Card>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ flex: 1, paddingRight: S.md }}>
-              <Text style={{ color: C.text, fontSize: 14, fontWeight: '600' }}>早上提醒今天练什么</Text>
-              <Text style={{ color: C.text3, fontSize: 11, marginTop: 3, lineHeight: 16 }}>
-                到点弹一条通知，写明今天跑多少、什么配速、要不要练力量
-              </Text>
+      {/* ---------- 设置 ---------- */}
+      <Section title="设置">
+        <List>
+          <View style={s.blockRow}>
+            <Text style={s.blockLabel}>外观</Text>
+            <View style={{ marginTop: S.sm }}>
+              <AppearancePicker />
             </View>
-            {remBusy ? (
-              <ActivityIndicator color={C.accent} />
-            ) : (
-              <Switch
-                value={rem.enabled}
-                onValueChange={toggleReminder}
-                trackColor={{ false: C.border, true: C.accent }}
-                thumbColor="#fff"
-              />
-            )}
           </View>
 
-          <View style={{ flexDirection: 'row', gap: S.sm, marginTop: S.md }}>
-            {TIME_PRESETS.map((t) => {
-              const on = rem.hour === t.h && rem.minute === t.m;
-              return (
-                <Pressable
-                  key={t.label}
-                  onPress={() => pickTime(t.h, t.m)}
-                  style={{
-                    flex: 1,
-                    paddingVertical: 9,
-                    borderRadius: 10,
-                    alignItems: 'center',
-                    backgroundColor: on ? C.accent + '22' : C.bgSoft,
-                    borderWidth: StyleSheet.hairlineWidth,
-                    borderColor: on ? C.accent : C.borderSoft,
-                  }}
-                >
-                  <Text style={{ color: on ? C.accent : C.text2, fontSize: 13, fontWeight: on ? '700' : '500' }}>
-                    {t.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+          <View style={s.blockRow}>
+            <Text style={s.blockLabel}>强调色</Text>
+            <View style={{ marginTop: S.sm }}>
+              <AccentPicker />
+            </View>
           </View>
-        </Card>
+
+          <ListRow
+            title="每日提醒"
+            sub="早上提醒今天练什么"
+            right={
+              remBusy ? (
+                <ActivityIndicator color={t.text2} />
+              ) : (
+                <Switch
+                  value={rem.enabled}
+                  onValueChange={toggleReminder}
+                  trackColor={{ false: t.cardInner, true: t.good }}
+                />
+              )
+            }
+          />
+
+          {rem.enabled ? (
+            <View style={s.blockRow}>
+              <Text style={s.blockLabel}>提醒时间</Text>
+              <View style={{ marginTop: S.sm }}>
+                <Segmented
+                  options={TIME_PRESETS.map((p) => ({ value: `${p.h}:${p.m}`, label: p.label }))}
+                  value={remKey}
+                  onChange={(v) => {
+                    const [h, m] = v.split(':').map(Number);
+                    pickTime(h, m);
+                  }}
+                />
+              </View>
+            </View>
+          ) : null}
+        </List>
       </Section>
 
-      {/* AI 今日建议正文 */}
+      {/* ---------- 数据 ---------- */}
+      <Section title="数据">
+        <List>
+          <ListRow
+            title={syncing === '增量' ? '同步中…' : '同步佳明'}
+            onPress={() => onSync(false)}
+            chevron
+          />
+          <ListRow
+            title={syncing === '全量' ? '拉取中…' : '拉取全部历史'}
+            onPress={() => onSync(true)}
+            chevron
+          />
+          <ListRow
+            title={syncing === '上传' ? '解析中…' : '上传 .fit 文件'}
+            onPress={onUpload}
+            chevron
+          />
+        </List>
+      </Section>
+
+      {/* ---------- AI 建议正文 ---------- */}
       <Section title="AI 今日训练建议">
         <Card>
           {advice ? (
-            <Text style={{ color: C.text2, fontSize: 13, lineHeight: 21 }}>{advice}</Text>
+            <Text style={s.adviceBody}>{advice}</Text>
           ) : (
             <View style={{ alignItems: 'flex-start' }}>
-              <Text style={{ color: C.text3, fontSize: 12, marginBottom: S.sm }}>
-                结合恢复数据、体能与计划生成今天的训练安排
-              </Text>
-              <Btn title={adviceLoading ? '生成中…' : '生成今日建议'} onPress={loadAdvice} disabled={adviceLoading} small />
+              <Text style={s.adviceHint}>结合恢复数据、体能与计划，生成今天该怎么练</Text>
+              <View style={{ marginTop: S.md, alignSelf: 'stretch' }}>
+                <Btn
+                  title={adviceLoading ? '生成中…' : '生成今日建议'}
+                  onPress={loadAdvice}
+                  disabled={adviceLoading}
+                  primary
+                />
+              </View>
             </View>
           )}
         </Card>
@@ -298,19 +387,52 @@ export default function TodayScreen() {
   );
 }
 
-function ActivityRow({ a, last }: { a: RecentActivity; last: boolean }) {
+/* ---------- 外观（跟随系统 / 浅色 / 深色） ---------- */
+function AppearancePicker() {
+  const { appearance, setAppearance } = useThemeControl();
   return (
-    <View style={[styles.actRow, last && { borderBottomWidth: 0 }]}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.actDate}>
+    <Segmented<Appearance>
+      options={[
+        { value: 'system', label: '跟随系统' },
+        { value: 'light', label: '浅色' },
+        { value: 'dark', label: '深色' },
+      ]}
+      value={appearance}
+      onChange={setAppearance}
+    />
+  );
+}
+
+/* ---------- 强调色 ---------- */
+function AccentPicker() {
+  const t = useTheme();
+  const { accent, setAccent } = useThemeControl();
+  return (
+    <ColorDots
+      colors={ACCENT_LIST.map((id) => ({ id, color: t.dark ? ACCENTS[id].dark : ACCENTS[id].light }))}
+      value={accent}
+      onChange={(id) => setAccent(id as AccentId)}
+    />
+  );
+}
+
+function ActivityRow({ a }: { a: RecentActivity }) {
+  const s = useStyles();
+  const t = useTheme();
+  const paceColor = a.avg_pace ? t.text : t.text2;
+  return (
+    <View style={s.actRow}>
+      <View style={{ flex: 1, paddingRight: S.sm }}>
+        <Text style={s.actTitle}>
           {F.dayShort(a.date)} · {zh(ACTIVITY_TYPE, a.type, '运动')}
         </Text>
-        <Text style={styles.actMeta}>
-          {F.num(a.distance_km, 2)} 公里 · {a.avg_pace} · 心率 {F.num(a.avg_hr)}
+        <Text style={s.actMeta}>
+          {F.num(a.distance_km, 2)} 公里 · <Text style={{ color: paceColor }}>{a.avg_pace || '–'}</Text> · 心率{' '}
+          {F.num(a.avg_hr)}
         </Text>
       </View>
       {a.notes ? (
-        <Text style={styles.actNotes} numberOfLines={1}>
+        <Text style={s.actNotes} numberOfLines={1}>
           {a.notes}
         </Text>
       ) : null}
@@ -318,20 +440,42 @@ function ActivityRow({ a, last }: { a: RecentActivity; last: boolean }) {
   );
 }
 
-const styles = StyleSheet.create({
-  cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.sm },
-  cardTitle: { color: C.text, fontSize: 15, fontWeight: '600' },
-  dateText: { color: C.text3, fontSize: 11 },
+const useStyles = makeStyles((t: Theme) => ({
+  cardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: S.sm,
+  },
+  eyebrow: { color: t.text2, fontSize: T.caption },
+  cardDate: { color: t.text3, fontSize: T.caption, ...TNUM },
+
+  heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: S.sm },
+  heroNum: { fontSize: T.hero, fontWeight: '600', letterSpacing: -2, ...TNUM, lineHeight: 54 },
+  heroNote: { fontSize: T.body2, fontWeight: '500' },
+  track: { height: 8, borderRadius: 5, overflow: 'hidden', marginTop: S.xs },
+
   statRow: { flexDirection: 'row', gap: S.sm },
+
+  adviceText: { fontSize: 22, fontWeight: '600', letterSpacing: -0.5, lineHeight: 30 },
+  adviceReason: { color: t.text2, fontSize: T.body2, lineHeight: 21, marginTop: S.sm - 2 },
+  adviceFoot: { color: t.text3, fontSize: T.micro, marginTop: S.sm, lineHeight: 17 },
+  adviceBody: { color: t.text, fontSize: T.body2, lineHeight: 24 },
+  adviceHint: { color: t.text2, fontSize: T.body2, lineHeight: 21 },
+
+  link: { fontSize: T.body, fontWeight: '400' },
+
+  blockRow: { paddingHorizontal: S.md, paddingVertical: 12 },
+  blockLabel: { color: t.text, fontSize: T.body, letterSpacing: -0.2 },
+
   actRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: S.md,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.border,
+    paddingVertical: 11,
+    minHeight: 56,
   },
-  actDate: { color: C.text, fontSize: 13, fontWeight: '500' },
-  actMeta: { color: C.text3, fontSize: 12, marginTop: 2 },
-  actNotes: { color: C.text3, fontSize: 11, maxWidth: 110, textAlign: 'right' },
-});
+  actTitle: { color: t.text, fontSize: T.body, letterSpacing: -0.2 },
+  actMeta: { color: t.text2, fontSize: T.caption, marginTop: 3, ...TNUM },
+  actNotes: { color: t.text3, fontSize: T.micro, maxWidth: 110, textAlign: 'right' },
+}));

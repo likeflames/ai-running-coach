@@ -14,7 +14,8 @@ import {
 import { api, chatStream, ChatEvent } from '../../../src/api';
 import { Glass } from '../../../src/glass';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, S, R } from '../../../src/theme';
+import { S, R, T, TNUM, alpha, type Theme } from '../../../src/theme';
+import { makeStyles, useTheme } from '../../../src/theme-provider';
 
 interface Msg {
   id: string;
@@ -43,6 +44,8 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 export default function ChatScreen() {
+  const t = useTheme();
+  const s = useStyles();
   const insets = useSafeAreaInsets();
   // 键盘弹起时输入栏贴着键盘，平时要让开底部的系统标签栏
   const [kbd, setKbd] = React.useState(false);
@@ -93,8 +96,8 @@ export default function ChatScreen() {
   // 流式输出很密（每字一个事件），统一 100ms 刷一次界面，避免卡顿
   React.useEffect(() => {
     if (!busy) return;
-    const t = setInterval(() => tick((n) => n + 1), 100);
-    return () => clearInterval(t);
+    const timer = setInterval(() => tick((n) => n + 1), 100);
+    return () => clearInterval(timer);
   }, [busy]);
 
   const onEvent = (ev: ChatEvent) => {
@@ -184,7 +187,7 @@ export default function ChatScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: C.bg }}
+      style={{ flex: 1, backgroundColor: t.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={0}
     >
@@ -198,13 +201,11 @@ export default function ChatScreen() {
         ListHeaderComponent={
           <View>
             {meta ? (
-              <Pressable onPress={loadMeta} style={styles.modelRow}>
-                <Text style={styles.modelText}>
+              <Pressable onPress={loadMeta} style={s.modelRow}>
+                <Text style={s.modelText}>
                   {meta.provider === 'deepseek' ? 'DeepSeek' : meta.provider} · {meta.model}
                   {'　'}今日 {meta.calls} 次 ·{' '}
-                  {meta.tokens >= 10000
-                    ? `${(meta.tokens / 10000).toFixed(1)} 万`
-                    : meta.tokens}{' '}
+                  {meta.tokens >= 10000 ? `${(meta.tokens / 10000).toFixed(1)} 万` : meta.tokens}{' '}
                   tokens
                 </Text>
               </Pressable>
@@ -222,23 +223,23 @@ export default function ChatScreen() {
                     setExpanded(next);
                   }
                 }}
-                style={styles.switchRow}
+                style={s.switchRow}
               >
-                <Text style={styles.switchText}>🧠 {anyOpen ? '收起全部思考' : '展开全部思考'}</Text>
+                <Text style={s.switchText}>{anyOpen ? '收起全部思考' : '展开全部思考'}</Text>
               </Pressable>
             ) : null}
           </View>
         }
         ListEmptyComponent={
           <View>
-            <Text style={styles.welcome}>👋 我是你的 AI 跑步教练</Text>
-            <Text style={styles.hint}>
+            <Text style={s.welcome}>我是你的 AI 跑步教练</Text>
+            <Text style={s.hint}>
               可以问我训练、恢复、配速、伤病、饮食等问题。我会先查你的真实数据和课表，再给出结论，并把思考过程摊开给你看。
             </Text>
             <View style={{ height: S.md }} />
             {QUICK.map((q) => (
-              <Pressable key={q} onPress={() => send(q)} style={styles.quick}>
-                <Text style={styles.quickText}>{q}</Text>
+              <Pressable key={q} onPress={() => send(q)} style={s.quick}>
+                <Text style={s.quickText}>{q}</Text>
               </Pressable>
             ))}
           </View>
@@ -246,47 +247,45 @@ export default function ChatScreen() {
         renderItem={({ item }) => {
           if (item.role === 'user') {
             return (
-              <View style={[styles.bubble, styles.userBubble]}>
-                <Text style={[styles.bubbleText, { color: C.bg }]}>{item.text}</Text>
+              <View style={[s.bubble, s.userBubble]}>
+                <Text style={[s.bubbleText, { color: t.accentInk }]}>{item.text}</Text>
               </View>
             );
           }
           const isStreaming = item.id === draft.current?.id;
           const open = expanded[item.id] ?? (isStreaming && item.phase === 'thinking');
           return (
-            <View style={[styles.bubble, styles.aiBubble]}>
+            <View style={[s.bubble, s.aiBubble]}>
               {item.thinking ? (
                 <Pressable
                   onPress={() => setExpanded((e) => ({ ...e, [item.id]: !open }))}
-                  style={styles.thinkHead}
+                  style={s.thinkHead}
                 >
-                  <Text style={styles.thinkTitle}>
-                    🧠 思考过程 · {item.thinking.length} 字
-                  </Text>
-                  <Text style={styles.thinkToggle}>{open ? '收起 ▲' : '展开 ▼'}</Text>
+                  <Text style={s.thinkTitle}>思考过程 · {item.thinking.length} 字</Text>
+                  <Text style={s.thinkToggle}>{open ? '收起 ▲' : '展开 ▼'}</Text>
                 </Pressable>
               ) : null}
 
               {item.thinking && open ? (
-                <View style={styles.thinkBox}>
-                  <Text style={styles.thinkText}>{item.thinking}</Text>
+                <View style={s.thinkBox}>
+                  <Text style={s.thinkText}>{item.thinking}</Text>
                 </View>
               ) : null}
 
               {item.thinking && !open ? (
-                <Text style={styles.thinkPeek} numberOfLines={1}>
+                <Text style={s.thinkPeek} numberOfLines={1}>
                   {item.thinking.replace(/\s+/g, ' ').slice(-70)}
                 </Text>
               ) : null}
 
-              {item.tool ? <Text style={styles.toolChip}>{item.tool}</Text> : null}
+              {item.tool ? <Text style={s.toolChip}>{item.tool}</Text> : null}
 
               {item.text ? (
-                <Text style={styles.bubbleText}>{item.text}</Text>
+                <Text style={s.bubbleText}>{item.text}</Text>
               ) : isStreaming ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                  <ActivityIndicator size="small" color={C.accent} />
-                  <Text style={styles.typingText}>{item.tool || '教练在思考…'}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <ActivityIndicator size="small" color={t.accent} />
+                  <Text style={s.typingText}>{item.tool || '教练在思考…'}</Text>
                 </View>
               ) : null}
             </View>
@@ -298,21 +297,21 @@ export default function ChatScreen() {
         insets.bottom 在系统标签栏里已经包含了「标签栏 + Home 指示条」的高度，
         所以只要让它贴着安全区底边，输入栏就正好落在悬浮标签栏的上面，不再额外加数。
       */}
-      <Glass style={[styles.inputBar, { marginBottom: kbd ? 6 : insets.bottom + 8 }]}>
+      <Glass style={[s.inputBar, { marginBottom: kbd ? 6 : insets.bottom + 8 }]}>
         <TextInput
-          style={styles.input}
+          style={s.input}
           value={input}
           onChangeText={setInput}
           placeholder="问点什么…"
-          placeholderTextColor={C.text3}
+          placeholderTextColor={t.text3}
           multiline
         />
         <Pressable
           onPress={() => send()}
           disabled={busy}
-          style={[styles.sendBtn, busy && { opacity: 0.5 }]}
+          style={[s.sendBtn, { backgroundColor: t.accent }, busy && { opacity: 0.5 }]}
         >
-          <Text style={{ color: C.bg, fontWeight: '700' }}>{busy ? '…' : '发送'}</Text>
+          <Text style={{ color: t.accentInk, fontWeight: '600', fontSize: T.body }}>{busy ? '…' : '发送'}</Text>
         </Pressable>
       </Glass>
     </KeyboardAvoidingView>
@@ -328,41 +327,43 @@ function history_for(msg: string, msgs: Msg[]) {
   return arr.slice(-12);
 }
 
-const styles = StyleSheet.create({
-  welcome: { color: C.text, fontSize: 17, fontWeight: '600', marginBottom: 6 },
-  hint: { color: C.text3, fontSize: 12, lineHeight: 18 },
+const useStyles = makeStyles((t: Theme) => ({
+  welcome: { color: t.text, fontSize: T.title + 2, fontWeight: '600', letterSpacing: -0.3, marginBottom: 8 },
+  hint: { color: t.text3, fontSize: T.caption, lineHeight: 21 },
   quick: {
-    padding: 12,
+    padding: S.md,
     borderRadius: R.md,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.card,
+    backgroundColor: t.card,
     marginBottom: S.sm,
   },
-  quickText: { color: C.text2, fontSize: 13 },
-  bubble: { padding: 12, borderRadius: R.md, marginBottom: S.sm, maxWidth: '92%' },
-  userBubble: { backgroundColor: C.accent, alignSelf: 'flex-end' },
-  aiBubble: { backgroundColor: C.card, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border },
-  bubbleText: { fontSize: 14, lineHeight: 21, color: C.text },
+  quickText: { color: t.text2, fontSize: T.body, lineHeight: 22 },
+  bubble: { padding: S.md - 2, borderRadius: R.md, marginBottom: S.sm, maxWidth: '92%' },
+  userBubble: { backgroundColor: t.accent, alignSelf: 'flex-end', borderBottomRightRadius: 6 },
+  aiBubble: {
+    backgroundColor: t.card,
+    borderBottomLeftRadius: 6,
+    ...(t.bordered ? { borderWidth: StyleSheet.hairlineWidth, borderColor: t.border } : null),
+  },
+  bubbleText: { fontSize: T.body + 0.5, lineHeight: 24, color: t.text },
   switchRow: { alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4, marginBottom: 4 },
   modelRow: { paddingVertical: 6, paddingHorizontal: 4, marginBottom: 2 },
-  modelText: { color: C.text3, fontSize: 11 },
-  switchText: { color: C.text3, fontSize: 11 },
-  thinkHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  thinkTitle: { color: C.text3, fontSize: 11, fontWeight: '600' },
-  thinkToggle: { color: C.accent, fontSize: 11 },
+  modelText: { color: t.text3, fontSize: T.micro, ...TNUM },
+  switchText: { color: t.text3, fontSize: T.micro + 1 },
+  thinkHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 },
+  thinkTitle: { color: t.text3, fontSize: T.micro + 1, fontWeight: '600' },
+  thinkToggle: { color: t.accent, fontSize: T.micro + 1 },
   thinkBox: {
-    backgroundColor: C.bgSoft,
-    borderRadius: R.sm,
-    padding: 10,
-    marginBottom: 8,
+    backgroundColor: t.bgSoft,
+    borderRadius: R.xs,
+    padding: S.sm + 2,
+    marginBottom: S.sm,
     borderLeftWidth: 2,
-    borderLeftColor: C.border,
+    borderLeftColor: t.border,
   },
-  thinkText: { color: C.text3, fontSize: 12, lineHeight: 19 },
-  thinkPeek: { color: C.text3, fontSize: 11, marginBottom: 8, opacity: 0.7 },
-  toolChip: { color: C.accent, fontSize: 11, marginBottom: 6 },
-  typingText: { color: C.text3, fontSize: 12 },
+  thinkText: { color: t.text3, fontSize: T.micro + 1.5, lineHeight: 21 },
+  thinkPeek: { color: t.text3, fontSize: T.micro + 1, marginBottom: S.sm, opacity: 0.7 },
+  toolChip: { color: t.accent, fontSize: T.micro + 1, marginBottom: 7 },
+  typingText: { color: t.text3, fontSize: T.caption },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -374,18 +375,17 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    maxHeight: 110,
-    color: C.text,
-    backgroundColor: C.card,
-    borderRadius: R.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
+    maxHeight: 120,
+    color: t.text,
+    backgroundColor: t.card,
+    borderRadius: R.sm,
+    paddingHorizontal: S.md - 2,
+    paddingVertical: 11,
+    fontSize: T.body + 1,
   },
   sendBtn: {
-    backgroundColor: C.accent,
-    borderRadius: R.md,
-    paddingHorizontal: 16,
-    paddingVertical: 11,
+    borderRadius: R.sm,
+    paddingHorizontal: S.md + 2,
+    paddingVertical: 12,
   },
-});
+}));

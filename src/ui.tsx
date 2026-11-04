@@ -1,4 +1,11 @@
-/* 通用 UI 组件：卡片、区块、指标、按钮、加载/错误/空状态 */
+/**
+ * 通用 UI 组件 —— 按 iOS 系统控件重做
+ *
+ * 关键的三条规则（也是"像苹果自带 App"的全部秘密）：
+ *  1. 分组列表：内容在白色圆角卡片里，卡片之间留大片空白，组与组之间用 13pt 灰字当标题
+ *  2. 分割线从左侧 16pt 开始，不通到边（inset separator）
+ *  3. 正文 17pt，次要文字压到 13pt 并降对比度，层级靠这个，不靠颜色
+ */
 import React from 'react';
 import {
   ActivityIndicator,
@@ -9,8 +16,10 @@ import {
   View,
   ViewStyle,
   RefreshControl,
+  type TextStyle,
 } from 'react-native';
-import { C, R, S } from './theme';
+import { R, S, T, TNUM, alpha, type Theme } from './theme';
+import { makeStyles, useTheme } from './theme-provider';
 
 export function Screen({
   children,
@@ -24,16 +33,16 @@ export function Screen({
   /** 不在标签页里时传 true：底部不用给系统标签栏留位置 */
   noTabBar?: boolean;
 }) {
+  const t = useTheme();
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: C.bg }}
-      // automatic：让系统按安全区自动留白。iOS 上会把导航栏高度、底部标签栏高度都算进去，
-      // 内容才不会钻到导航栏底下、也不会被悬浮标签栏压住。
+      style={{ flex: 1, backgroundColor: t.bg }}
+      // automatic：让系统按安全区自动留白。配大标题导航栏时才会算对顶部 inset。
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ padding: S.md, paddingBottom: noTabBar ? 24 : 16 }}
+      contentContainerStyle={{ paddingHorizontal: S.md, paddingTop: S.sm, paddingBottom: noTabBar ? 40 : 28 }}
       refreshControl={
         onRefresh ? (
-          <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} tintColor={C.accent} />
+          <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} tintColor={t.text2} />
         ) : undefined
       }
     >
@@ -42,146 +51,463 @@ export function Screen({
   );
 }
 
-export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
-  return <View style={[s.card, style]}>{children}</View>;
-}
-
-export function Section({ title, right, children }: { title: string; right?: React.ReactNode; children?: React.ReactNode }) {
+/** 圆角卡片。tint 传颜色时整张卡染一层极淡的色，比描边克制 */
+export function Card({
+  children,
+  style,
+  tint,
+}: {
+  children: React.ReactNode;
+  style?: ViewStyle | ViewStyle[];
+  tint?: string;
+}) {
+  const t = useTheme();
   return (
-    <View style={{ marginBottom: S.lg }}>
-      <View style={s.sectionHead}>
-        <Text style={s.sectionTitle}>{title}</Text>
-        {right}
-      </View>
+    <View
+      style={[
+        {
+          backgroundColor: tint ? alpha(tint, t.dark ? 0.11 : 0.07) : t.card,
+          borderRadius: R.lg,
+          padding: S.md,
+          marginBottom: S.sm + 2,
+        },
+        style,
+      ]}
+    >
       {children}
     </View>
   );
 }
 
+/**
+ * 分组。标题是 13pt 灰字（跟系统设置里的分组标题一样），
+ * 不是原来那种 18pt 粗体 —— 粗体标题会把视线从内容上抢走。
+ */
+export function Section({
+  title,
+  right,
+  children,
+  desc,
+}: {
+  title?: string;
+  right?: React.ReactNode;
+  children?: React.ReactNode;
+  desc?: string;
+}) {
+  const s = useStyles();
+  return (
+    <View style={{ marginTop: S.lg, marginBottom: S.xs }}>
+      {title ? (
+        <View style={s.sectionHead}>
+          <Text style={s.sectionTitle}>{title}</Text>
+          {right}
+        </View>
+      ) : null}
+      {desc ? <Text style={s.sectionDesc}>{desc}</Text> : null}
+      {children}
+    </View>
+  );
+}
+
+/** 卡片内的小标题 + 右侧操作 */
+export function CardHead({ title, right, sub }: { title: string; right?: React.ReactNode; sub?: string }) {
+  const s = useStyles();
+  return (
+    <View style={s.cardHead}>
+      <View style={{ flex: 1 }}>
+        <Text style={s.cardTitle}>{title}</Text>
+        {sub ? <Text style={s.cardSub}>{sub}</Text> : null}
+      </View>
+      {right}
+    </View>
+  );
+}
+
+/**
+ * 分组列表容器：子项之间自动插缩进分割线，最后一项不画。
+ * 用它就能做出「设置」那种一整个圆角块里多行的效果。
+ */
+export function List({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
+  const t = useTheme();
+  const items = React.Children.toArray(children).filter(Boolean);
+  return (
+    <View style={[{ backgroundColor: t.card, borderRadius: R.lg, overflow: 'hidden' }, style]}>
+      {items.map((child, i) => (
+        <React.Fragment key={i}>
+          {child}
+          {i < items.length - 1 ? (
+            <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.border, marginLeft: S.md }} />
+          ) : null}
+        </React.Fragment>
+      ))}
+    </View>
+  );
+}
+
+/** 列表行：左标题（可带说明），右侧值 / 开关 / 箭头 */
+export function ListRow({
+  title,
+  sub,
+  value,
+  right,
+  onPress,
+  chevron,
+}: {
+  title: string;
+  sub?: string;
+  value?: string | number;
+  right?: React.ReactNode;
+  onPress?: () => void;
+  chevron?: boolean;
+}) {
+  const t = useTheme();
+  const s = useStyles();
+  const body = (
+    <View style={s.listRow}>
+      <View style={{ flex: 1, paddingRight: S.sm }}>
+        <Text style={s.listTitle}>{title}</Text>
+        {sub ? <Text style={s.listSub}>{sub}</Text> : null}
+      </View>
+      {value !== undefined ? <Text style={s.listValue}>{value}</Text> : null}
+      {right}
+      {chevron ? (
+        <Text style={[s.chevron, { color: t.text3 }]}>›</Text>
+      ) : null}
+    </View>
+  );
+  if (!onPress) return body;
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => (pressed ? { backgroundColor: t.bgSoft } : null)}>
+      {body}
+    </Pressable>
+  );
+}
+
+/** iOS 分段控件 */
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: t.dark ? 'rgba(118,118,128,0.24)' : 'rgba(120,120,128,0.12)',
+        borderRadius: 9,
+        padding: 2,
+      }}
+    >
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <Pressable
+            key={o.value}
+            onPress={() => onChange(o.value)}
+            style={{
+              flex: 1,
+              paddingVertical: 6,
+              borderRadius: 7,
+              alignItems: 'center',
+              backgroundColor: on ? (t.dark ? '#636366' : '#FFFFFF') : 'transparent',
+              ...(on && !t.dark
+                ? { shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 3, shadowOffset: { width: 0, height: 2 } }
+                : null),
+            }}
+          >
+            <Text
+              style={{
+                fontSize: T.caption,
+                fontWeight: on ? '600' : '500',
+                color: on ? t.text : t.text2,
+              }}
+            >
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** 强调色选择：一排系统色圆点，选中的画一圈外环 */
+export function ColorDots({
+  colors,
+  value,
+  onChange,
+}: {
+  colors: { id: string; color: string }[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const t = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', gap: 14, flexWrap: 'wrap' }}>
+      {colors.map((c) => {
+        const on = c.id === value;
+        return (
+          <Pressable key={c.id} onPress={() => onChange(c.id)} hitSlop={6}>
+            <View
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 15,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 2.5,
+                borderColor: on ? c.color : 'transparent',
+              }}
+            >
+              <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: c.color }} />
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** 指标：标签在上、数字在下。big 用于页面主角 */
 export function Stat({
   label,
   value,
   unit,
   color,
+  big,
 }: {
   label: string;
   value: string | number | null | undefined;
   unit?: string;
   color?: string;
+  big?: boolean;
 }) {
+  const s = useStyles();
+  const empty = value === null || value === undefined || value === '';
   return (
     <View style={s.stat}>
-      <Text style={s.statLabel}>{label}</Text>
-      <Text style={[s.statValue, color ? { color } : null]} numberOfLines={1}>
-        {value === null || value === undefined || value === '' ? '-' : value}
-        {unit ? <Text style={s.statUnit}> {unit}</Text> : null}
+      <Text style={s.statLabel} numberOfLines={1}>
+        {label}
+      </Text>
+      <Text style={[big ? s.statBig : s.statValue, color ? { color } : null]} numberOfLines={1}>
+        {empty ? '–' : value}
+        {unit && !empty ? <Text style={s.statUnit}> {unit}</Text> : null}
       </Text>
     </View>
   );
 }
 
+/** 一行「标签 …… 数值」 */
 export function Row({ label, value, color }: { label: string; value: string | number; color?: string }) {
+  const t = useTheme();
+  const s = useStyles();
   return (
-    <View style={s.row}>
+    <View style={[s.row, { borderBottomColor: t.border }]}>
       <Text style={s.rowLabel}>{label}</Text>
+      <View style={s.rowDots} />
       <Text style={[s.rowValue, color ? { color } : null]}>{value}</Text>
     </View>
   );
 }
 
+/** 小标签胶囊 */
 export function Pill({ text, color }: { text: string; color?: string }) {
+  const t = useTheme();
+  const c = color || t.accent;
   return (
-    <View style={[s.pill, { borderColor: (color || C.accent) + '66', backgroundColor: (color || C.accent) + '18' }]}>
-      <Text style={{ color: color || C.accent, fontSize: 11, fontWeight: '600' }}>{text}</Text>
+    <View
+      style={{
+        paddingHorizontal: 9,
+        paddingVertical: 3,
+        borderRadius: R.pill,
+        backgroundColor: alpha(c, t.dark ? 0.2 : 0.13),
+      }}
+    >
+      <Text style={{ color: c, fontSize: T.micro, fontWeight: '600' }}>{text}</Text>
     </View>
   );
 }
 
+/** 按钮。primary = 实心强调色（一屏最多一个），默认是 iOS 的柔和次按钮 */
 export function Btn({
   title,
   onPress,
   color,
   disabled,
   small,
+  primary,
 }: {
   title: string;
   onPress: () => void;
   color?: string;
   disabled?: boolean;
   small?: boolean;
+  primary?: boolean;
 }) {
+  const t = useTheme();
+  const s = useStyles();
+  const c = color || t.accent;
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => [
         s.btn,
-        small && { paddingVertical: 6, paddingHorizontal: 10 },
-        { borderColor: (color || C.accent) + '88', backgroundColor: (color || C.accent) + (pressed ? '33' : '1a') },
-        disabled && { opacity: 0.4 },
+        small && s.btnSmall,
+        {
+          backgroundColor: primary ? c : t.dark ? 'rgba(118,118,128,0.24)' : 'rgba(120,120,128,0.12)',
+          opacity: disabled ? 0.4 : pressed ? 0.75 : 1,
+        },
       ]}
     >
-      <Text style={{ color: color || C.accent, fontWeight: '600', fontSize: small ? 12 : 14 }}>{title}</Text>
+      <Text
+        style={{
+          color: primary ? t.accentInk : c,
+          fontWeight: '600',
+          fontSize: small ? T.caption : T.body,
+        }}
+      >
+        {title}
+      </Text>
     </Pressable>
   );
 }
 
 export function Loading({ text = '加载中…' }: { text?: string }) {
+  const t = useTheme();
   return (
-    <View style={s.center}>
-      <ActivityIndicator color={C.accent} />
-      <Text style={{ color: C.text3, marginTop: S.sm, fontSize: 13 }}>{text}</Text>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, backgroundColor: t.bg }}>
+      <ActivityIndicator color={t.text2} />
+      <Text style={{ color: t.text2, marginTop: S.sm + 2, fontSize: T.body2 }}>{text}</Text>
     </View>
   );
 }
 
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const t = useTheme();
   return (
-    <Card style={{ borderColor: C.bad + '66' }}>
-      <Text style={{ color: C.bad, fontSize: 13, marginBottom: S.sm }}>⚠️ {message}</Text>
+    <Card tint={t.bad}>
+      <Text style={{ color: t.bad, fontSize: T.body, fontWeight: '600', marginBottom: 4 }}>出错了</Text>
+      <Text style={{ color: t.text2, fontSize: T.body2, lineHeight: 21, marginBottom: S.md }}>{message}</Text>
       {onRetry ? <Btn title="重试" onPress={onRetry} small /> : null}
     </Card>
   );
 }
 
 export function Empty({ text }: { text: string }) {
+  const t = useTheme();
   return (
     <Card>
-      <Text style={{ color: C.text3, fontSize: 13, textAlign: 'center', paddingVertical: S.md }}>{text}</Text>
+      <Text style={{ color: t.text2, fontSize: T.body2, textAlign: 'center', paddingVertical: S.lg }}>
+        {text}
+      </Text>
     </Card>
   );
 }
 
-const s = StyleSheet.create({
-  card: {
-    backgroundColor: C.card,
-    borderRadius: R.md,
-    padding: S.md,
-    marginBottom: S.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
-  },
+/** 细分割线 */
+export function Divider({ inset = 0 }: { inset?: number }) {
+  const t = useTheme();
+  return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.border, marginLeft: inset }} />;
+}
+
+/** 给需要自定义文字的地方复用 */
+export const text = {
+  body: (t: Theme): TextStyle => ({ color: t.text, fontSize: T.body }),
+  secondary: (t: Theme): TextStyle => ({ color: t.text2, fontSize: T.body2, lineHeight: 21 }),
+};
+
+const useStyles = makeStyles((t: Theme) => ({
   sectionHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: S.md,
+    marginBottom: S.sm - 2,
+  },
+  sectionTitle: {
+    color: t.text2,
+    fontSize: T.caption,
+    fontWeight: '400',
+  },
+  sectionDesc: {
+    color: t.text2,
+    fontSize: T.caption,
+    lineHeight: 18,
+    paddingHorizontal: S.md,
+    marginTop: -2,
     marginBottom: S.sm,
   },
-  sectionTitle: { color: C.text, fontSize: 15, fontWeight: '600' },
-  stat: { flex: 1, minWidth: 76, paddingVertical: 6 },
-  statLabel: { color: C.text3, fontSize: 11, marginBottom: 3 },
-  statValue: { color: C.text, fontSize: 17, fontWeight: '600' },
-  statUnit: { color: C.text3, fontSize: 11, fontWeight: '400' },
-  row: {
+  cardHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 7,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.border,
+    alignItems: 'flex-start',
+    marginBottom: S.md - 4,
+    gap: S.sm,
   },
-  rowLabel: { color: C.text2, fontSize: 13 },
-  rowValue: { color: C.text, fontSize: 13, fontWeight: '500' },
-  pill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, borderWidth: 1, alignSelf: 'flex-start' },
-  btn: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: R.sm, borderWidth: 1, alignItems: 'center' },
-  center: { alignItems: 'center', justifyContent: 'center', padding: 30 },
-});
+  cardTitle: {
+    color: t.text,
+    fontSize: T.body,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+  cardSub: { color: t.text2, fontSize: T.caption, marginTop: 2 },
+
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: S.md,
+    minHeight: 48,
+    paddingVertical: 11,
+  },
+  listTitle: { color: t.text, fontSize: T.body, letterSpacing: -0.2 },
+  listSub: { color: t.text2, fontSize: T.caption, marginTop: 2, lineHeight: 18 },
+  listValue: { color: t.text2, fontSize: T.body, ...TNUM },
+  chevron: { fontSize: 22, fontWeight: '300', marginLeft: 6, marginTop: -2 },
+
+  stat: { flex: 1, minWidth: 70, paddingVertical: 2 },
+  statLabel: {
+    color: t.text2,
+    fontSize: T.caption,
+    marginBottom: 2,
+  },
+  statValue: {
+    color: t.text,
+    fontSize: T.num,
+    fontWeight: '600',
+    letterSpacing: -0.8,
+    ...TNUM,
+  },
+  statBig: {
+    color: t.text,
+    fontSize: T.hero,
+    fontWeight: '600',
+    letterSpacing: -2,
+    ...TNUM,
+  },
+  statUnit: { color: t.text2, fontSize: T.caption, fontWeight: '400', letterSpacing: 0 },
+
+  row: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    paddingVertical: 11,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  rowLabel: { color: t.text2, fontSize: T.body },
+  rowDots: { flex: 1 },
+  rowValue: { color: t.text, fontSize: T.body, fontWeight: '500', ...TNUM },
+
+  btn: {
+    paddingVertical: 12,
+    paddingHorizontal: S.lg,
+    borderRadius: R.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnSmall: { paddingVertical: 7, paddingHorizontal: 14, borderRadius: R.sm },
+}));

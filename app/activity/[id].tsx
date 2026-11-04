@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { api } from '../../src/api';
 import { Screen, Card, Section, Row, Loading, ErrorBox, Empty, Stat, Pill } from '../../src/ui';
 import { Sparkline } from '../../src/charts';
-import { C, S } from '../../src/theme';
+import { S, T, type Theme } from '../../src/theme';
+import { makeStyles, useTheme } from '../../src/theme-provider';
 import { F } from '../../src/format';
 import { ACTIVITY_TYPE, SOURCE, zh } from '../../src/labels';
 
@@ -18,6 +19,8 @@ interface TrackResp {
 }
 
 export default function ActivityDetail() {
+  const t = useTheme();
+  const s = useStyles();
   const { id } = useLocalSearchParams<{ id: string }>();
   const nav = useNavigation();
   const [detail, setDetail] = React.useState<any>(null);
@@ -29,12 +32,12 @@ export default function ActivityDetail() {
     if (!id) return;
     setLoading(true);
     try {
-      const [d, t] = await Promise.all([
+      const [d, tr] = await Promise.all([
         api.get(`/api/activity/${id}/details`),
         api.get<TrackResp>(`/api/activity/${id}/track`).catch(() => null),
       ]);
       setDetail(d);
-      setTrack(t);
+      setTrack(tr);
       setErr(null);
     } catch (e: any) {
       setErr(e?.message || '加载失败');
@@ -67,8 +70,18 @@ export default function ActivityDetail() {
   }, [track]);
 
   if (loading) return <Loading />;
-  if (err) return <Screen noTabBar><ErrorBox message={err} onRetry={load} /></Screen>;
-  if (!detail?.activity) return <Screen noTabBar><Empty text="未找到该活动" /></Screen>;
+  if (err)
+    return (
+      <Screen noTabBar>
+        <ErrorBox message={err} onRetry={load} />
+      </Screen>
+    );
+  if (!detail?.activity)
+    return (
+      <Screen noTabBar>
+        <Empty text="未找到该活动" />
+      </Screen>
+    );
 
   const a = detail.activity;
   const typeLabel = zh(ACTIVITY_TYPE, a.type, '运动');
@@ -76,9 +89,9 @@ export default function ActivityDetail() {
   const hr = (track?.hr || []).filter((v): v is number => typeof v === 'number' && v > 0);
   const alt = (track?.alt || []).filter((v): v is number => typeof v === 'number');
 
-  const spAvg = speedKmh.length ? speedKmh.reduce((s, v) => s + v, 0) / speedKmh.length : 0;
+  const spAvg = speedKmh.length ? speedKmh.reduce((acc, v) => acc + v, 0) / speedKmh.length : 0;
   const spMax = speedKmh.length ? Math.max(...speedKmh) : 0;
-  const hrAvg = hr.length ? hr.reduce((s, v) => s + v, 0) / hr.length : 0;
+  const hrAvg = hr.length ? hr.reduce((acc, v) => acc + v, 0) / hr.length : 0;
   const hrMax = hr.length ? Math.max(...hr) : 0;
   const altMin = alt.length ? Math.min(...alt) : 0;
   const altMax = alt.length ? Math.max(...alt) : 0;
@@ -86,22 +99,23 @@ export default function ActivityDetail() {
   return (
     <Screen noTabBar>
       <Card>
-        <View style={styles.head}>
-          <Text style={styles.title}>{typeLabel}</Text>
-          {a.source ? <Pill text={zh(SOURCE, a.source, '已记录')} color={C.text3} /> : null}
+        <View style={s.head}>
+          <Text style={s.title}>{typeLabel}</Text>
+          {a.source ? <Pill text={zh(SOURCE, a.source, '已记录')} color={t.text3} /> : null}
         </View>
-        <Text style={styles.meta}>
+        <Text style={s.meta}>
           {F.dateTime(a.date)}
           {a.notes ? ` · ${a.notes}` : ''}
         </Text>
-        <View style={[styles.statRow, { marginTop: S.md }]}>
-          <Stat label="距离" value={F.num(a.distance_km, 2)} unit="公里" />
+        <View style={[s.statRow, { marginTop: S.md }]}>
+          <Stat label="距离" value={F.num(a.distance_km, 2)} unit="公里" big />
           <Stat label="时长" value={F.duration(a.duration_min)} />
           <Stat label="配速" value={a.avg_pace} />
         </View>
-        <View style={styles.statRow}>
+        <View style={[s.statRow, { marginTop: S.sm }]}>
           <Stat label="平均心率" value={F.num(a.avg_hr)} unit="次/分" />
           <Stat label="最大心率" value={F.num(a.max_hr)} unit="次/分" />
+          <View style={{ flex: 1, minWidth: 72 }} />
         </View>
       </Card>
 
@@ -110,14 +124,14 @@ export default function ActivityDetail() {
         <Card>
           {speedKmh.length > 1 ? (
             <>
-              <View style={styles.sumRow}>
+              <View style={s.sumRow}>
                 <Stat label="平均速度" value={F.num(spAvg, 1)} unit="公里/小时" />
-                <Stat label="最高速度" value={F.num(spMax, 1)} unit="公里/小时" color={C.accent} />
+                <Stat label="最高速度" value={F.num(spMax, 1)} unit="公里/小时" color={t.accent} />
               </View>
-              <Sparkline values={speedKmh} color={C.accent} height={90} />
+              <Sparkline values={speedKmh} color={t.accent} height={95} />
             </>
           ) : (
-            <Text style={styles.meta}>这次活动没有速度数据</Text>
+            <Text style={s.meta}>这次活动没有速度数据</Text>
           )}
         </Card>
       </Section>
@@ -127,14 +141,14 @@ export default function ActivityDetail() {
         <Card>
           {hr.length > 1 ? (
             <>
-              <View style={styles.sumRow}>
+              <View style={s.sumRow}>
                 <Stat label="平均心率" value={F.num(hrAvg)} unit="次/分" />
-                <Stat label="最高心率" value={F.num(hrMax)} unit="次/分" color={C.bad} />
+                <Stat label="最高心率" value={F.num(hrMax)} unit="次/分" color={t.bad} />
               </View>
-              <Sparkline values={hr} color={C.bad} height={90} />
+              <Sparkline values={hr} color={t.bad} height={95} />
             </>
           ) : (
-            <Text style={styles.meta}>这次活动没有心率数据</Text>
+            <Text style={s.meta}>这次活动没有心率数据</Text>
           )}
         </Card>
       </Section>
@@ -144,15 +158,15 @@ export default function ActivityDetail() {
         <Card>
           {alt.length > 1 ? (
             <>
-              <View style={styles.sumRow}>
+              <View style={s.sumRow}>
                 <Stat label="最低海拔" value={F.num(altMin)} unit="米" />
-                <Stat label="最高海拔" value={F.num(altMax)} unit="米" color={C.good} />
+                <Stat label="最高海拔" value={F.num(altMax)} unit="米" color={t.good} />
                 <Stat label="累计爬升" value={F.num(a.ascent_m ?? detail.metrics?.session?.total_ascent)} unit="米" />
               </View>
-              <Sparkline values={alt} color={C.good} height={90} />
+              <Sparkline values={alt} color={t.good} height={95} />
             </>
           ) : (
-            <Text style={styles.meta}>这次活动没有海拔数据</Text>
+            <Text style={s.meta}>这次活动没有海拔数据</Text>
           )}
         </Card>
       </Section>
@@ -160,10 +174,10 @@ export default function ActivityDetail() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t: Theme) => ({
   head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  title: { color: C.text, fontSize: 18, fontWeight: '700' },
-  meta: { color: C.text3, fontSize: 11, marginTop: 4 },
+  title: { color: t.text, fontSize: T.title + 2, fontWeight: '600', letterSpacing: -0.3 },
+  meta: { color: t.text3, fontSize: T.micro + 1, marginTop: S.xs, lineHeight: 18 },
   statRow: { flexDirection: 'row', gap: S.sm },
   sumRow: { flexDirection: 'row', gap: S.sm, marginBottom: S.sm },
-});
+}));

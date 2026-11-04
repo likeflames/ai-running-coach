@@ -1,13 +1,16 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, FlatList } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { api, Activity } from '../src/api';
 import { Screen, Card, Loading, ErrorBox, Empty, Pill } from '../src/ui';
-import { C, S } from '../src/theme';
+import { S, T, type Theme } from '../src/theme';
+import { makeStyles, useTheme } from '../src/theme-provider';
 import { F } from '../src/format';
 import { ACTIVITY_TYPE, SOURCE, zh } from '../src/labels';
 
-export default function MapsScreen() {
+export default function AllActivitiesScreen() {
+  const t = useTheme();
+  const s = useStyles();
   const router = useRouter();
   const [items, setItems] = React.useState<Activity[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -31,32 +34,38 @@ export default function MapsScreen() {
   }, [load]);
 
   if (loading) return <Loading />;
-  if (err) return <Screen noTabBar><ErrorBox message={err} onRetry={load} /></Screen>;
+  if (err)
+    return (
+      <Screen noTabBar>
+        <ErrorBox message={err} onRetry={load} />
+      </Screen>
+    );
 
   return (
     <Screen noTabBar>
-      <Text style={styles.hint}>共 {items.length} 条活动，点开可看速度、心率和海拔</Text>
+      <Text style={s.hint}>共 {items.length} 条活动，点开可看速度、心率和海拔</Text>
       {items.length === 0 ? (
         <Empty text="暂无活动记录" />
       ) : (
         items.map((a) => (
           <Pressable key={a.id} onPress={() => router.push(`/activity/${a.id}`)}>
             <Card style={{ marginBottom: S.sm }}>
-              <View style={styles.row}>
+              <View style={s.row}>
                 <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={styles.title}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={s.title}>
                       {F.dayShort(a.date)} · {zh(ACTIVITY_TYPE, a.type, '运动')}
                     </Text>
-                    {a.has_track ? <Pill text="有详细数据" color={C.good} /> : null}
-                    {a.source ? <Pill text={zh(SOURCE, a.source, "已记录")} color={C.text3} /> : null}
+                    {a.has_track ? <Pill text="含轨迹" color={t.good} /> : null}
+                    {a.source ? <Pill text={zh(SOURCE, a.source, '已记录')} color={t.text3} /> : null}
                   </View>
-                  <Text style={styles.meta}>
-                    {F.num(a.distance_km, 2)} 公里 · {a.avg_pace} · 心率 {F.num(a.avg_hr)} · {F.duration(a.duration_min)}
+                  <Text style={s.meta}>
+                    {F.num(a.distance_km, 2)} 公里 · {a.avg_pace} · 心率 {F.num(a.avg_hr)} ·{' '}
+                    {F.duration(a.duration_min)}
                   </Text>
-                  {a.notes ? <Text style={styles.notes}>{a.notes}</Text> : null}
+                  {a.notes ? <Text style={s.notes}>{a.notes}</Text> : null}
                 </View>
-                <Text style={styles.arrow}>›</Text>
+                <Text style={s.arrow}>›</Text>
               </View>
             </Card>
           </Pressable>
@@ -66,11 +75,11 @@ export default function MapsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  hint: { color: C.text3, fontSize: 11, marginBottom: S.sm },
+const useStyles = makeStyles((t: Theme) => ({
+  hint: { color: t.text3, fontSize: T.micro + 1, marginBottom: S.sm },
   row: { flexDirection: 'row', alignItems: 'center' },
-  title: { color: C.text, fontSize: 14, fontWeight: '600' },
-  meta: { color: C.text3, fontSize: 12, marginTop: 4 },
-  notes: { color: C.text3, fontSize: 11, marginTop: 2 },
-  arrow: { color: C.text3, fontSize: 22, marginLeft: 8 },
-});
+  title: { color: t.text, fontSize: T.body + 1, fontWeight: '600', letterSpacing: -0.1 },
+  meta: { color: t.text3, fontSize: T.caption, marginTop: 5, lineHeight: 19 },
+  notes: { color: t.text3, fontSize: T.micro + 1, marginTop: 3 },
+  arrow: { color: t.text3, fontSize: 26, marginLeft: S.sm, fontWeight: '300' },
+}));

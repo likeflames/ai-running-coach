@@ -1,10 +1,12 @@
 import React from 'react';
 import { Stack } from 'expo-router';
-import { STACK_OPTIONS } from '../../../src/nav';
+import { largeTitleOptions } from '../../../src/nav';
+import { useTheme } from '../../../src/theme-provider';
 
 export default function RaceLayout() {
+  const t = useTheme();
   return (
-    <Stack screenOptions={STACK_OPTIONS}>
+    <Stack screenOptions={largeTitleOptions(t)}>
       <Stack.Screen name="index" options={{ title: '比赛' }} />
     </Stack>
   );

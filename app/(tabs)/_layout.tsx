@@ -1,19 +1,21 @@
 import React from 'react';
 import { NativeTabs } from 'expo-router/native-tabs';
-import { C } from '../../src/theme';
+import { useTheme } from '../../src/theme-provider';
+import { T } from '../../src/theme';
 
 /**
  * 用的是 iOS 系统自带的 UITabBarController（expo-router/native-tabs）。
  * iOS 26 上系统自动画液态玻璃、自动随滚动收缩，不需要写任何样式。
  */
 export default function TabsLayout() {
+  const t = useTheme();
   return (
     <NativeTabs
-      iconColor={{ default: C.text3, selected: C.accent }}
-      tintColor={C.accent}
+      iconColor={{ default: t.text3, selected: t.accent }}
+      tintColor={t.accent}
       labelStyle={{
-        default: { color: C.text3, fontSize: 10 },
-        selected: { color: C.accent, fontSize: 10 },
+        default: { color: t.text3, fontSize: T.micro },
+        selected: { color: t.accent, fontSize: T.micro },
       }}
     >
       <NativeTabs.Trigger name="index">

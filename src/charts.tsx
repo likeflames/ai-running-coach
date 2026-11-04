@@ -1,8 +1,9 @@
 /* 轻量图表：SVG 手绘，零第三方图表依赖（与 Web 端思路一致） */
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import Svg, { Path, Line, Circle, Rect, Text as SvgText, Polyline } from 'react-native-svg';
-import { C } from './theme';
+import { T, alpha, type Theme } from './theme';
+import { makeStyles, useTheme } from './theme-provider';
 
 function buildPath(points: number[], w: number, h: number, min: number, max: number) {
   if (!points.length) return '';
@@ -21,7 +22,7 @@ function buildPath(points: number[], w: number, h: number, min: number, max: num
 export function Sparkline({
   values,
   height = 90,
-  color = C.accent,
+  color,
   area = true,
   labels,
 }: {
@@ -31,32 +32,38 @@ export function Sparkline({
   area?: boolean;
   labels?: string[];
 }) {
+  const t = useTheme();
+  const s = useStyles();
+  const stroke = color || t.accent;
   const [w, setW] = React.useState(0);
   const pad = 4;
   const min = Math.min(...values, 0);
   const max = Math.max(...values, 1);
   const h = height - pad * 2;
   const line = buildPath(values, w, h, min, max);
-  const areaPath =
-    w > 0 && values.length > 0
-      ? `${line} L${w},${h} L0,${h} Z`
-      : '';
+  const areaPath = w > 0 && values.length > 0 ? `${line} L${w},${h} L0,${h} Z` : '';
 
   return (
     <View onLayout={(e) => setW(e.nativeEvent.layout.width)} style={{ height }}>
       {w > 0 && values.length > 1 ? (
         <Svg width={w} height={height}>
-          <Line x1={0} y1={h + pad} x2={w} y2={h + pad} stroke={C.border} strokeWidth={1} />
-          {area ? <Path d={`M0,${pad} ${areaPath.replace(/^M[^ ]+ /, '')}`} fill={color + '22'} stroke="none" /> : null}
-          <Path d={line} stroke={color} strokeWidth={2} fill="none" transform={`translate(0,${pad})`} />
+          <Line x1={0} y1={h + pad} x2={w} y2={h + pad} stroke={t.border} strokeWidth={1} />
+          {area ? (
+            <Path
+              d={`M0,${pad} ${areaPath.replace(/^M[^ ]+ /, '')}`}
+              fill={alpha(stroke, 0.14)}
+              stroke="none"
+            />
+          ) : null}
+          <Path d={line} stroke={stroke} strokeWidth={2.4} fill="none" transform={`translate(0,${pad})`} />
         </Svg>
       ) : (
         <View style={s.ph}>
-          <Text style={{ color: C.text3, fontSize: 12 }}>暂无数据</Text>
+          <Text style={{ color: t.text3, fontSize: T.caption }}>暂无数据</Text>
         </View>
       )}
       {labels && labels.length ? (
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
           <Text style={s.lbl}>{labels[0]}</Text>
           <Text style={s.lbl}>{labels[labels.length - 1]}</Text>
         </View>
@@ -78,7 +85,7 @@ export interface ChartSeries {
 export function LineChart({
   series,
   labels,
-  height = 130,
+  height = 140,
   zeroLine = false,
   band,
   yTicks = 3,
@@ -90,22 +97,23 @@ export function LineChart({
   band?: { from: number; to: number; color: string };
   yTicks?: number;
 }) {
+  const t = useTheme();
   const [w, setW] = React.useState(0);
-  const gutter = 30; // 左侧留给 Y 轴数字
-  const top = 6;
-  const bottom = 16; // 底部留给日期
+  const gutter = 32; // 左侧留给 Y 轴数字
+  const top = 8;
+  const bottom = 18; // 底部留给日期
   const plotW = Math.max(0, w - gutter);
   const plotH = height - top - bottom;
 
-  const all = series.flatMap((s) => s.values).filter((v) => Number.isFinite(v));
+  const all = series.flatMap((x) => x.values).filter((v) => Number.isFinite(v));
   if (zeroLine) all.push(0);
   if (band) all.push(band.from, band.to);
 
   if (!all.length) {
     return (
       <View style={{ height }}>
-        <View style={s.ph}>
-          <Text style={{ color: C.text3, fontSize: 12 }}>暂无数据</Text>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: t.text3, fontSize: T.caption }}>暂无数据</Text>
         </View>
       </View>
     );
@@ -129,7 +137,14 @@ export function LineChart({
   const ticks = Array.from({ length: yTicks + 1 }, (_, i) => min + ((max - min) * i) / yTicks);
   // 日期只标 4 个位置，避免挤在一起
   const labelIdx = labels.length
-    ? Array.from(new Set([0, Math.floor((labels.length - 1) / 3), Math.floor(((labels.length - 1) * 2) / 3), labels.length - 1]))
+    ? Array.from(
+        new Set([
+          0,
+          Math.floor((labels.length - 1) / 3),
+          Math.floor(((labels.length - 1) * 2) / 3),
+          labels.length - 1,
+        ])
+      )
     : [];
 
   return (
@@ -143,30 +158,39 @@ export function LineChart({
               y={yOf(band.to)}
               width={plotW}
               height={Math.max(1, yOf(band.from) - yOf(band.to))}
-              fill={band.color}
-              opacity={0.14}
+              fill={alpha(band.color, 0.14)}
             />
           ) : null}
 
           {/* 横向网格 + Y 轴刻度 */}
-          {ticks.map((t, i) => (
+          {ticks.map((v, i) => (
             <React.Fragment key={`y${i}`}>
-              <Line x1={gutter} y1={yOf(t)} x2={w} y2={yOf(t)} stroke={C.border} strokeWidth={1} opacity={0.5} />
-              <SvgText
-                x={gutter - 5}
-                y={yOf(t) + 3.5}
-                fontSize={9}
-                fill={C.text3}
-                textAnchor="end"
-              >
-                {Math.round(t)}
+              <Line
+                x1={gutter}
+                y1={yOf(v)}
+                x2={w}
+                y2={yOf(v)}
+                stroke={t.border}
+                strokeWidth={1}
+                opacity={0.7}
+              />
+              <SvgText x={gutter - 6} y={yOf(v) + 4} fontSize={11} fill={t.text3} textAnchor="end">
+                {Math.round(v)}
               </SvgText>
             </React.Fragment>
           ))}
 
           {/* 0 线 */}
           {zeroLine && min < 0 && max > 0 ? (
-            <Line x1={gutter} y1={yOf(0)} x2={w} y2={yOf(0)} stroke={C.text3} strokeWidth={1} strokeDasharray="3,3" />
+            <Line
+              x1={gutter}
+              y1={yOf(0)}
+              x2={w}
+              y2={yOf(0)}
+              stroke={t.text3}
+              strokeWidth={1}
+              strokeDasharray="3,3"
+            />
           ) : null}
 
           {/* 曲线 */}
@@ -174,22 +198,25 @@ export function LineChart({
             const pts = se.values.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`);
             if (pts.length < 2) return null;
             const d = 'M' + pts.join(' L');
-            const areaD = `${d} L${xOf(se.values.length - 1).toFixed(1)},${top + plotH} L${gutter},${top + plotH} Z`;
+            const areaD = `${d} L${xOf(se.values.length - 1).toFixed(1)},${top + plotH} L${gutter},${
+              top + plotH
+            } Z`;
             return (
               <React.Fragment key={`s${si}`}>
-                {se.area ? <Path d={areaD} fill={se.color} opacity={0.14} stroke="none" /> : null}
+                {se.area ? <Path d={areaD} fill={alpha(se.color, 0.14)} stroke="none" /> : null}
                 <Path
                   d={d}
                   stroke={se.color}
-                  strokeWidth={2}
+                  strokeWidth={2.4}
                   fill="none"
                   strokeDasharray={se.dashed ? '4,3' : undefined}
                   strokeLinejoin="round"
+                  strokeLinecap="round"
                 />
                 <Circle
                   cx={xOf(se.values.length - 1)}
                   cy={yOf(se.values[se.values.length - 1])}
-                  r={2.6}
+                  r={3}
                   fill={se.color}
                 />
               </React.Fragment>
@@ -202,8 +229,8 @@ export function LineChart({
               key={`x${idx}`}
               x={xOf(idx)}
               y={height - 3}
-              fontSize={9}
-              fill={C.text3}
+              fontSize={11}
+              fill={t.text3}
               textAnchor={idx === 0 ? 'start' : idx === labels.length - 1 ? 'end' : 'middle'}
             >
               {labels[idx]}
@@ -217,31 +244,33 @@ export function LineChart({
 
 /** 图例 */
 export function Legend({ items }: { items: { color: string; label: string; dashed?: boolean }[] }) {
+  const t = useTheme();
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 4 }}>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 6 }}>
       {items.map((it) => (
-        <View key={it.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <View key={it.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
           <View
             style={{
-              width: 12,
+              width: 14,
               height: 3,
               borderRadius: 2,
               backgroundColor: it.color,
               opacity: it.dashed ? 0.5 : 1,
             }}
           />
-          <Text style={{ color: C.text3, fontSize: 10 }}>{it.label}</Text>
+          <Text style={{ color: t.text3, fontSize: T.micro + 0.5 }}>{it.label}</Text>
         </View>
       ))}
     </View>
   );
 }
 
-/** 柱状图 */export function Bars({
+/** 柱状图 */
+export function Bars({
   values,
   labels,
-  height = 100,
-  color = C.accent,
+  height = 110,
+  color,
   highlightLast = true,
 }: {
   values: number[];
@@ -250,6 +279,9 @@ export function Legend({ items }: { items: { color: string; label: string; dashe
   color?: string;
   highlightLast?: boolean;
 }) {
+  const t = useTheme();
+  const s = useStyles();
+  const fill = color || t.accent;
   const [w, setW] = React.useState(0);
   const max = Math.max(...values, 1);
   const n = values.length || 1;
@@ -271,8 +303,8 @@ export function Legend({ items }: { items: { color: string; label: string; dashe
                   y={height - bh}
                   width={bw}
                   height={bh}
-                  rx={2}
-                  fill={isLast ? color : color + '66'}
+                  rx={bw > 6 ? 3 : 2}
+                  fill={isLast ? fill : alpha(fill, 0.45)}
                 />
               );
             })}
@@ -280,7 +312,7 @@ export function Legend({ items }: { items: { color: string; label: string; dashe
         ) : null}
       </View>
       {labels && labels.length ? (
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
           <Text style={s.lbl}>{labels[0]}</Text>
           <Text style={s.lbl}>{labels[labels.length - 1]}</Text>
         </View>
@@ -293,12 +325,13 @@ export function Legend({ items }: { items: { color: string; label: string; dashe
 export function Heatmap({
   days,
   weeks = 26,
-  cell = 9,
+  cell = 10,
 }: {
   days: Record<string, number>;
   weeks?: number;
   cell?: number;
 }) {
+  const t = useTheme();
   const cols: { date: string; km: number }[][] = [];
   const today = new Date();
   const start = new Date(today);
@@ -318,22 +351,23 @@ export function Heatmap({
     cols.push(col);
   }
 
+  // 用主题强调色的 5 级透明度，任何主题下都协调
   const color = (km: number) => {
-    if (!km) return C.cardInner;
-    if (km < 5) return '#1b4f5e';
-    if (km < 10) return '#2a7f96';
-    if (km < 20) return '#38a9c9';
-    return C.accent;
+    if (!km) return t.cardInner;
+    if (km < 5) return alpha(t.accent, 0.26);
+    if (km < 10) return alpha(t.accent, 0.46);
+    if (km < 20) return alpha(t.accent, 0.7);
+    return t.accent;
   };
 
   return (
-    <View style={{ flexDirection: 'row', gap: 2 }}>
+    <View style={{ flexDirection: 'row', gap: 2.5 }}>
       {cols.map((col, ci) => (
-        <View key={ci} style={{ gap: 2 }}>
+        <View key={ci} style={{ gap: 2.5 }}>
           {col.map((day, di) => (
             <View
               key={di}
-              style={{ width: cell, height: cell, borderRadius: 2, backgroundColor: color(day.km) }}
+              style={{ width: cell, height: cell, borderRadius: 2.5, backgroundColor: color(day.km) }}
             />
           ))}
         </View>
@@ -343,9 +377,16 @@ export function Heatmap({
 }
 
 /** GPS 轨迹（无底图，纯形状轮廓） */
-export function TrackShape({ points, height = 180 }: { points: { lat: number; lon: number }[]; height?: number }) {
+export function TrackShape({
+  points,
+  height = 190,
+}: {
+  points: { lat: number; lon: number }[];
+  height?: number;
+}) {
+  const t = useTheme();
   const [w, setW] = React.useState(0);
-  if (!points.length) return <Text style={{ color: C.text3, fontSize: 12 }}>无轨迹数据</Text>;
+  if (!points.length) return <Text style={{ color: t.text3, fontSize: T.caption }}>无轨迹数据</Text>;
 
   const lats = points.map((p) => p.lat);
   const lons = points.map((p) => p.lon);
@@ -369,14 +410,21 @@ export function TrackShape({ points, height = 180 }: { points: { lat: number; lo
     <View onLayout={(e) => setW(e.nativeEvent.layout.width)} style={{ height }}>
       {w > 0 ? (
         <Svg width={w} height={height}>
-          <Polyline points={pts} fill="none" stroke={C.accent} strokeWidth={2.5} strokeLinejoin="round" />
+          <Polyline
+            points={pts}
+            fill="none"
+            stroke={t.accent}
+            strokeWidth={2.6}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
         </Svg>
       ) : null}
     </View>
   );
 }
 
-const s = StyleSheet.create({
+const useStyles = makeStyles((t: Theme) => ({
   ph: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  lbl: { color: C.text3, fontSize: 10 },
-});
+  lbl: { color: t.text3, fontSize: T.micro + 0.5 },
+}));

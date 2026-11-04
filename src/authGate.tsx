@@ -16,11 +16,14 @@ import {
   View,
 } from 'react-native';
 import { registerTokenPrompt, setAccessToken } from './api';
-import { C, R, S } from './theme';
+import { R, S, T, alpha, type Theme } from './theme';
+import { makeStyles, useTheme } from './theme-provider';
 
 type Props = { children: React.ReactNode };
 
 export function TokenGate({ children }: Props) {
+  const th = useTheme();
+  const s = useStyles();
   const [visible, setVisible] = useState(false);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -68,48 +71,61 @@ export function TokenGate({ children }: Props) {
       <Modal visible={visible} transparent animationType="fade" onRequestClose={() => settle(null)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.mask}
+          style={[s.mask, { backgroundColor: th.dark ? 'rgba(0,0,0,0.68)' : 'rgba(20,24,30,0.42)' }]}
         >
-          <View style={styles.card}>
-            <Text style={styles.title}>需要访问口令</Text>
-            <Text style={styles.desc}>
+          <View style={[s.card, { backgroundColor: th.card }]}>
+            <Text style={s.title}>需要访问口令</Text>
+            <Text style={s.desc}>
               这台服务器设了口令，输入一次以后就不用再输了。{'\n'}
-              口令就是服务器配置文件里的 <Text style={styles.code}>ACCESS_TOKEN</Text>。
+              口令就是服务器配置文件里的 <Text style={s.code}>ACCESS_TOKEN</Text>。
             </Text>
 
             <TextInput
               value={input}
-              onChangeText={(t) => {
-                setInput(t);
+              onChangeText={(v) => {
+                setInput(v);
                 if (hint) setHint('');
               }}
               placeholder="请输入访问口令"
-              placeholderTextColor={C.text3}
+              placeholderTextColor={th.text3}
               autoCapitalize="none"
               autoCorrect={false}
               secureTextEntry
-              style={styles.input}
+              style={[
+                s.input,
+                {
+                  backgroundColor: th.bgSoft,
+                  borderColor: th.borderSoft,
+                  color: th.text,
+                },
+              ]}
               onSubmitEditing={submit}
               returnKeyType="done"
             />
-            {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+            {hint ? <Text style={s.hint}>{hint}</Text> : null}
 
-            <View style={styles.row}>
+            <View style={s.row}>
               <Pressable
                 onPress={() => settle(null)}
-                style={({ pressed }) => [styles.btn, styles.btnGhost, pressed && styles.pressed]}
+                style={({ pressed }) => [
+                  s.btn,
+                  { backgroundColor: th.bgSoft, opacity: pressed ? 0.72 : 1 },
+                ]}
               >
-                <Text style={styles.btnGhostText}>取消</Text>
+                <Text style={[s.btnText, { color: th.text2 }]}>取消</Text>
               </Pressable>
               <Pressable
                 onPress={submit}
                 disabled={busy}
-                style={({ pressed }) => [styles.btn, styles.btnPrimary, pressed && styles.pressed]}
+                style={({ pressed }) => [
+                  s.btn,
+                  { backgroundColor: th.accent, opacity: pressed ? 0.82 : 1 },
+                ]}
               >
                 {busy ? (
-                  <ActivityIndicator color="#0f1115" size="small" />
+                  <ActivityIndicator color={th.accentInk} size="small" />
                 ) : (
-                  <Text style={styles.btnPrimaryText}>确定</Text>
+                  <Text style={[s.btnText, { color: th.accentInk, fontWeight: '600' }]}>确定</Text>
                 )}
               </Pressable>
             </View>
@@ -120,10 +136,9 @@ export function TokenGate({ children }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((t: Theme) => ({
   mask: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.62)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: S.xl,
@@ -131,73 +146,55 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: C.card,
     borderRadius: R.xl,
-    padding: S.xl,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
+    padding: S.xl - 2,
+    borderWidth: t.bordered ? StyleSheet.hairlineWidth : 0,
+    borderColor: t.border,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: C.text,
+    fontSize: T.title + 2,
+    fontWeight: '600',
+    color: t.text,
+    letterSpacing: -0.3,
     marginBottom: S.sm,
   },
   desc: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: C.text2,
+    fontSize: T.body2,
+    lineHeight: 21,
+    color: t.text2,
     marginBottom: S.lg,
   },
   code: {
-    color: C.accent,
+    color: t.accent,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 12,
+    fontSize: T.caption,
   },
   input: {
-    backgroundColor: C.bgSoft,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.borderSoft,
     borderRadius: R.md,
     paddingHorizontal: S.md,
-    paddingVertical: 13,
-    fontSize: 16,
-    color: C.text,
+    paddingVertical: 14,
+    fontSize: 17,
   },
   hint: {
     marginTop: S.sm,
-    fontSize: 12,
-    color: C.bad,
+    fontSize: T.caption,
+    color: t.bad,
   },
   row: {
     flexDirection: 'row',
-    gap: S.md,
+    gap: S.sm + 2,
     marginTop: S.lg,
   },
   btn: {
     flex: 1,
-    height: 46,
+    height: 50,
     borderRadius: R.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnGhost: {
-    backgroundColor: C.bgSoft,
-  },
-  btnGhostText: {
-    fontSize: 15,
-    color: C.text2,
+  btnText: {
+    fontSize: T.body + 1,
     fontWeight: '500',
   },
-  btnPrimary: {
-    backgroundColor: C.accent,
-  },
-  btnPrimaryText: {
-    fontSize: 15,
-    color: '#0f1115',
-    fontWeight: '700',
-  },
-  pressed: {
-    opacity: 0.72,
-  },
-});
+}));

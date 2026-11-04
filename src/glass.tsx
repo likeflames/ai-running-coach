@@ -14,7 +14,7 @@
  */
 import React from 'react';
 import { View, StyleSheet, Platform, type ViewStyle } from 'react-native';
-import { C } from './theme';
+import { useTheme } from './theme-provider';
 
 type GlassProps = {
   children?: React.ReactNode;
@@ -43,6 +43,7 @@ try {
 export const isGlassSupported = nativeAvailable;
 
 export function Glass({ children, style, tint, interactive, variant = 'regular' }: GlassProps) {
+  const t = useTheme();
   if (nativeAvailable && NativeGlassView) {
     return (
       <NativeGlassView
@@ -57,7 +58,17 @@ export function Glass({ children, style, tint, interactive, variant = 'regular' 
   }
   // —— 兜底：视觉上尽量接近，但不是系统材质 ——
   return (
-    <View style={[styles.fallback, style]}>
+    <View
+      style={[
+        {
+          backgroundColor: t.dark ? 'rgba(26,30,38,0.86)' : 'rgba(255,255,255,0.9)',
+          borderWidth: StyleSheet.hairlineWidth * 2,
+          borderColor: t.dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)',
+          overflow: 'hidden',
+        },
+        style,
+      ]}
+    >
       {tint ? <View style={[StyleSheet.absoluteFill, { backgroundColor: tint, opacity: 0.12 }]} /> : null}
       {children}
     </View>
@@ -72,13 +83,3 @@ export function glassBorder(color = 'rgba(255,255,255,0.14)') {
     borderTopColor: 'rgba(255,255,255,0.22)',
   } as ViewStyle;
 }
-
-const styles = StyleSheet.create({
-  fallback: {
-    backgroundColor: 'rgba(22,25,32,0.82)',
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderTopColor: 'rgba(255,255,255,0.2)',
-    overflow: 'hidden',
-  },
-});
