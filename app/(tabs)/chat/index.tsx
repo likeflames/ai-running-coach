@@ -13,6 +13,7 @@ import {
   Animated,
   Easing,
 } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { api, chatStream, ChatEvent } from '../../../src/api';
 import { Markdown } from '../../../src/markdown';
 import { Glass } from '../../../src/glass';
@@ -51,6 +52,7 @@ const TOOL_LABELS: Record<string, string> = {
 export default function ChatScreen() {
   const t = useTheme();
   const s = useStyles();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   // 键盘弹起时输入栏贴着键盘，平时要让开底部的系统标签栏
   const [kbd, setKbd] = React.useState(false);
@@ -85,15 +87,27 @@ export default function ChatScreen() {
   const listRef = React.useRef<FlatList<Msg>>(null);
   const [meta, setMeta] = React.useState<{
     provider: string;
+    provider_label: string;
     model: string;
+    key_source: string;
+    configured: boolean;
     calls: number;
     tokens: number;
   } | null>(null);
 
   // 顶部那行小字：当前模型 + 今天实际消耗的 token（后端每次调用都记账）
+  // 模型配置是活的，所以每次回到这个页面都重新取一次，用户刚在设置里换完模型能立刻看到
   const loadMeta = React.useCallback(() => {
     Promise.all([
-      api.get<{ provider: string; model: string }>('/api/chat/model').catch(() => null),
+      api
+        .get<{
+          provider: string;
+          provider_label?: string;
+          model: string;
+          key_source?: string;
+          configured?: boolean;
+        }>('/api/chat/model')
+        .catch(() => null),
       api
         .get<{ today_usage: { calls: number; total_tokens: number } }>('/api/chat/usage')
         .catch(() => null),
@@ -101,16 +115,21 @@ export default function ChatScreen() {
       if (!m) return;
       setMeta({
         provider: m.provider,
+        provider_label: m.provider_label || m.provider,
         model: m.model,
+        key_source: m.key_source || 'none',
+        configured: m.configured !== false,
         calls: u?.today_usage?.calls || 0,
         tokens: u?.today_usage?.total_tokens || 0,
       });
     });
   }, []);
 
-  React.useEffect(() => {
-    loadMeta();
-  }, [loadMeta]);
+  useFocusEffect(
+    React.useCallback(() => {
+      loadMeta();
+    }, [loadMeta])
+  );
 
   /** 把 ref 里的草稿节流刷到界面。只在内容真变了才 setState */
   const push = React.useCallback((force = false) => {
@@ -292,12 +311,26 @@ export default function ChatScreen() {
         ListHeaderComponent={
           <View>
             {meta ? (
-              <Pressable onPress={loadMeta} style={s.modelRow}>
-                <Text style={s.modelText}>
-                  {meta.provider === 'deepseek' ? 'DeepSeek' : meta.provider} · {meta.model}
-                  {'　'}今日 {meta.calls} 次 ·{' '}
-                  {meta.tokens >= 10000 ? `${(meta.tokens / 10000).toFixed(1)} 万` : meta.tokens}{' '}
-                  tokens
+              <Pressable onPress={() => router.push('/model-config')} style={s.modelRow}>
+                <Text
+                  style={[s.modelText, !meta.configured && { color: t.bad }]}
+                  numberOfLines={1}
+                >
+                  {meta.configured
+                    ? `${meta.provider_label} · ${meta.model}${
+                        meta.key_source === 'self' ? ' · 我的 Key' : ''
+                      }`
+                    : '还没配置模型，点这里填一个'}
+                  {meta.configured ? '　' : '　'}
+                  {meta.configured ? (
+                    <>
+                      今日 {meta.calls} 次 ·{' '}
+                      {meta.tokens >= 10000
+                        ? `${(meta.tokens / 10000).toFixed(1)} 万`
+                        : meta.tokens}{' '}
+                      tokens
+                    </>
+                  ) : null}
                 </Text>
               </Pressable>
             ) : null}

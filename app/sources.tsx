@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Alert, Linking, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { api } from '../src/api';
-import { Screen, Card, Loading, ErrorBox, Pill, Btn, Hint } from '../src/ui';
+import { Screen, Card, Loading, ErrorBox, Pill, Btn, Hint, Field } from '../src/ui';
 import { S, T, type Theme } from '../src/theme';
 import { makeStyles, useTheme } from '../src/theme-provider';
 
@@ -21,6 +21,15 @@ interface SourceInfo {
   last_error: string;
 }
 
+interface CredField {
+  field: string;
+  label: string;
+  layer: 'platform' | 'user';
+  set: boolean;
+  source: string;
+  masked: string;
+}
+
 const CAP: Record<string, string> = {
   recovery: '恢复',
   activity: '训练',
@@ -34,6 +43,10 @@ export default function SourcesScreen() {
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
+  // 「凭据」表单：editing 是正在编辑哪个数据源，credFields 是后端说该填什么
+  const [editing, setEditing] = React.useState<string | null>(null);
+  const [credFields, setCredFields] = React.useState<CredField[]>([]);
+  const [form, setForm] = React.useState<Record<string, string>>({});
 
   const load = React.useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -115,6 +128,59 @@ export default function SourcesScreen() {
     ]);
   };
 
+  const toggleCred = async (src: SourceInfo) => {
+    if (editing === src.id) {
+      setEditing(null);
+      return;
+    }
+    setBusy(src.id);
+    try {
+      const d = await api.get<{ fields: CredField[] }>(`/api/settings/sources/${src.id}`);
+      setCredFields(d.fields || []);
+      setForm({});
+      setEditing(src.id);
+    } catch (e: any) {
+      Alert.alert('加载失败', e?.message || '未知错误');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveCred = async (src: SourceInfo) => {
+    const values: Record<string, string> = {};
+    credFields.forEach((f) => {
+      const v = (form[f.field] || '').trim();
+      if (v) values[f.field] = v;
+    });
+    if (!Object.keys(values).length) {
+      Alert.alert('没有改动', '输入框都空着：填了才保存，不填不影响现有配置。');
+      return;
+    }
+    setBusy(src.id);
+    try {
+      const r = await api.put<{ ok: boolean; configured: boolean; test?: { ok: boolean; message?: string; error?: string } }>(
+        `/api/settings/sources/${src.id}`,
+        { values, test: true },
+        90000
+      );
+      if (r?.test && !r.test.ok) {
+        Alert.alert('已保存，但验证没通过', r.test.error || '可以先保存，稍后再试');
+      } else {
+        Alert.alert(
+          '已保存',
+          r?.test?.message || (r?.configured ? '凭据齐了，可以点「去授权 / 连接」' : '已保存')
+        );
+      }
+      setEditing(null);
+      setForm({});
+      await load(true);
+    } catch (e: any) {
+      Alert.alert('保存失败', e?.message || '未知错误');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (loading) return <Loading />;
   if (err)
     return (
@@ -167,9 +233,9 @@ export default function SourcesScreen() {
           <View style={s.actions}>
             {!src.connected ? (
               <Btn
-                title={src.configured ? (src.auth === 'oauth' ? '去授权' : '连接') : '服务器未配置'}
-                onPress={() => connect(src)}
-                disabled={!src.configured || busy === src.id}
+                title={src.configured ? (src.auth === 'oauth' ? '去授权' : '连接') : '填写凭据'}
+                onPress={() => (src.configured ? connect(src) : toggleCred(src))}
+                disabled={busy === src.id}
                 primary
                 small
               />
@@ -179,7 +245,48 @@ export default function SourcesScreen() {
                 <Btn title="断开" onPress={() => disconnect(src)} disabled={busy === src.id} small />
               </>
             )}
+            <Btn
+              title={editing === src.id ? '收起凭据' : '凭据'}
+              onPress={() => toggleCred(src)}
+              disabled={busy === src.id}
+              small
+            />
           </View>
+
+          {editing === src.id ? (
+            <View style={s.credForm}>
+              {credFields.map((f) => (
+                <Field
+                  key={f.field}
+                  label={f.label}
+                  value={form[f.field] || ''}
+                  onChangeText={(v) => setForm({ ...form, [f.field]: v })}
+                  secure={f.field !== 'client_id' && f.field !== 'email'}
+                  placeholder={f.set ? `已保存（${f.masked}），留空则不修改` : ''}
+                  hint={
+                    f.layer === 'platform'
+                      ? '应用级凭据，全平台共用一份，管理员填一次即可'
+                      : '你的账号，加密存储，只有你的数据会用到它'
+                  }
+                />
+              ))}
+              <View style={s.actions}>
+                <Btn
+                  title={busy === src.id ? '保存中…' : '保存'}
+                  onPress={() => saveCred(src)}
+                  disabled={busy === src.id}
+                  primary
+                  small
+                />
+              </View>
+              {src.auth === 'oauth' ? (
+                <Text style={s.credNote}>
+                  {src.name} 用的是 OAuth 授权：这里填的是「应用身份」（开发者注册得到），
+                  填完后再点「去授权」，用你自己的账号登录允许访问。
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
         </Card>
       ))}
 
@@ -212,4 +319,6 @@ const useStyles = makeStyles((t: Theme) => ({
   note: { color: t.text3, fontSize: T.micro, lineHeight: 18, marginTop: S.sm },
   meta: { color: t.text3, fontSize: T.micro, marginTop: 6 },
   actions: { flexDirection: 'row', gap: S.sm, marginTop: S.md },
+  credForm: { marginTop: S.md, paddingTop: S.md, borderTopWidth: 0.5, borderTopColor: t.border },
+  credNote: { color: t.text3, fontSize: T.micro, lineHeight: 18, marginTop: S.xs },
 }));

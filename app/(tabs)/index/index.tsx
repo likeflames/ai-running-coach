@@ -440,6 +440,12 @@ export default function TodayScreen() {
             chevron
           />
           <ListRow
+            title="模型"
+            sub="用自己的 API Key 跑对话，费用算自己的"
+            onPress={() => router.push('/model-config')}
+            chevron
+          />
+          <ListRow
             title={syncing === '增量' ? '同步中…' : '同步佳明'}
             onPress={() => onSync(false)}
             chevron

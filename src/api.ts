@@ -263,6 +263,21 @@ export const api = {
       timeoutMs
     ),
 
+  /** 更新配置（模型 key、数据源凭据） */
+  put: <T = any>(path: string, body: any, timeoutMs = DEFAULT_TIMEOUT) =>
+    request<T>(
+      path,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      timeoutMs
+    ),
+
+  del: <T = any>(path: string, timeoutMs = DEFAULT_TIMEOUT) =>
+    request<T>(path, { method: 'DELETE' }, timeoutMs),
+
   /** 表单提交（后端多个接口用 FormData 接收） */
   form: <T = any>(path: string, data: Record<string, string | number>, timeoutMs = DEFAULT_TIMEOUT) => {
     const fd = new FormData();

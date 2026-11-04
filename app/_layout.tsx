@@ -37,6 +37,7 @@ function AppShell() {
           <Stack.Screen name="activity/[id]" options={{ title: '活动详情' }} />
           <Stack.Screen name="activities" options={{ title: '全部活动' }} />
           <Stack.Screen name="sources" options={{ title: '数据源' }} />
+          <Stack.Screen name="model-config" options={{ title: '模型' }} />
         </Stack>
       </TokenGate>
     </>

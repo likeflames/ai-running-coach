@@ -15,6 +15,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   ViewStyle,
   RefreshControl,
@@ -490,6 +491,62 @@ export function Divider({ inset = 0 }: { inset?: number }) {  const t = useTheme
   return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.border, marginLeft: inset }} />;
 }
 
+/**
+ * 表单输入行。用于填写 API Key、账号密码这类配置。
+ *
+ * 刻意不做浮动标签、不做边框：iOS 设置里的输入框就是一行白底 + 上面一行灰字。
+ * 密码类字段永远不回显原值 —— 上层传进来的 value 是「新输入的内容」，
+ * 服务器已有的值只以「已保存 ·••••1234」的形式展示在 hint 里。
+ */
+export function Field({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  secure,
+  hint,
+  mono,
+  autoFocus,
+  keyboardType,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (v: string) => void;
+  placeholder?: string;
+  secure?: boolean;
+  hint?: string;
+  mono?: boolean;
+  autoFocus?: boolean;
+  keyboardType?: 'default' | 'email-address' | 'url';
+}) {
+  const t = useTheme();
+  const s = useStyles();
+  return (
+    <View style={{ marginBottom: S.md }}>
+      <Text style={s.fieldLabel}>{label}</Text>
+      <View style={[s.fieldBox, { backgroundColor: t.card, borderColor: t.border }]}>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={t.text3}
+          secureTextEntry={secure}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoFocus={autoFocus}
+          keyboardType={keyboardType}
+          style={[
+            s.fieldInput,
+            { color: t.text },
+            mono ? { fontFamily: undefined, letterSpacing: 0.2 } : null,
+          ]}
+        />
+      </View>
+      {hint ? <Text style={s.fieldHint}>{hint}</Text> : null}
+    </View>
+  );
+}
+
 /** 给需要自定义文字的地方复用 */
 export const text = {
   body: (t: Theme): TextStyle => ({ color: t.text, fontSize: T.body }),
@@ -543,6 +600,30 @@ const useStyles = makeStyles((t: Theme) => ({
   listSub: { color: t.text2, fontSize: T.caption, marginTop: 2, lineHeight: 18 },
   listValue: { color: t.text2, fontSize: T.body, ...TNUM },
   chevron: { fontSize: 22, fontWeight: '300', marginLeft: 6, marginTop: -2 },
+
+  fieldLabel: {
+    color: t.text2,
+    fontSize: T.caption,
+    marginBottom: 6,
+    paddingHorizontal: 2,
+  },
+  fieldBox: {
+    borderRadius: R.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: S.md - 2,
+  },
+  fieldInput: {
+    fontSize: T.body2,
+    minHeight: 44,
+    paddingVertical: 10,
+  },
+  fieldHint: {
+    color: t.text3,
+    fontSize: T.micro,
+    lineHeight: 17,
+    marginTop: 5,
+    paddingHorizontal: 2,
+  },
 
   stat: { flex: 1, minWidth: 70, paddingVertical: 2 },
   statLabel: {
