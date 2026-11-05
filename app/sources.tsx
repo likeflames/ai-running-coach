@@ -319,7 +319,11 @@ export default function SourcesScreen() {
                 <Btn
                   title={needsCred ? '填写账号' : '连接'}
                   onPress={() => (needsCred ? toggleCred(src) : connect(src))}
-                  disabled={busy === src.id || !src.configured}
+                  // 「填写账号」这条路必须永远可点：之所以叫「填写账号」，
+                  // 正是因为还没配好。把 !configured 一起放进 disabled 会死锁
+                  // ——按钮灰着，就永远没机会填，也就永远配不好。
+                  // 只有「连接」才需要在没配好时禁掉。
+                  disabled={busy === src.id || (!needsCred && !src.configured)}
                   primary
                   small
                 />
