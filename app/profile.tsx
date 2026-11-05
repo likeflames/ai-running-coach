@@ -24,6 +24,9 @@ interface Profile {
   weight_kg: string;
   race_date: string;
   race_distance_km: string;
+  resting_hr: string;
+  max_hr: string;
+  sex: string;
 }
 
 /** 分数字符串 → "23:30" 这种好读的格式 */
@@ -67,6 +70,9 @@ export default function ProfileScreen() {
     weight_kg: '',
     race_date: '',
     race_distance_km: '',
+    resting_hr: '',
+    max_hr: '',
+    sex: '',
   });
 
   React.useEffect(() => {
@@ -81,6 +87,9 @@ export default function ProfileScreen() {
           weight_kg: r.profile.weight_kg || '',
           race_date: r.profile.race_date || '',
           race_distance_km: r.profile.race_distance_km || '',
+          resting_hr: r.profile.resting_hr || '',
+          max_hr: r.profile.max_hr || '',
+          sex: r.profile.sex || '',
         });
       })
       .catch((e: any) => setErr(e?.message || '读取失败'))
@@ -97,6 +106,14 @@ export default function ProfileScreen() {
     if (rd && (!Number.isFinite(Number(rd)) || Number(rd) < 1 || Number(rd) > 200)) {
       return setErr('目标比赛距离填 1–200 之间的公里数，例如 21.1');
     }
+    const rhr = f.resting_hr.trim();
+    if (rhr && (!Number.isFinite(Number(rhr)) || Number(rhr) < 30 || Number(rhr) > 100)) {
+      return setErr('静息心率填 30–100 之间的整数');
+    }
+    const mhr = f.max_hr.trim();
+    if (mhr && (!Number.isFinite(Number(mhr)) || Number(mhr) < 120 || Number(mhr) > 230)) {
+      return setErr('最大心率填 120–230 之间的整数');
+    }
 
     setSaving(true);
     try {
@@ -108,6 +125,9 @@ export default function ProfileScreen() {
         weight_kg: f.weight_kg.trim(),
         race_date: f.race_date.trim(),
         race_distance_km: rd,
+        resting_hr: rhr,
+        max_hr: mhr,
+        sex: f.sex.trim(),
       });
       Alert.alert('已保存', '训练配速和计划会按你的成绩重新计算。', [
         { text: '好', onPress: () => router.back() },
@@ -176,6 +196,34 @@ export default function ProfileScreen() {
               placeholder="21.1 / 42.195 / 10"
               keyboard="decimal-pad"
               hint="决定课表专项；留空时从目标文字或历史最长跑推断。"
+            />
+          </Card>
+        </Section>
+
+        <Section title="负荷模型（可选）" desc="不填就用近 28 天观测值，再缺才用默认系数">
+          <Card>
+            <Field
+              label="静息心率"
+              value={f.resting_hr}
+              onChange={(v) => setF({ ...f, resting_hr: v })}
+              placeholder="55"
+              keyboard="number-pad"
+              hint="晨起静息心率。填了比默认 55 更准。"
+            />
+            <Field
+              label="最大心率"
+              value={f.max_hr}
+              onChange={(v) => setF({ ...f, max_hr: v })}
+              placeholder="190"
+              keyboard="number-pad"
+              hint="实测最大心率，不是 220−年龄的估算值。"
+            />
+            <Field
+              label="性别"
+              value={f.sex}
+              onChange={(v) => setF({ ...f, sex: v })}
+              placeholder="male / female / other"
+              hint="只影响 TRIMP 系数；不填按男性系数估算。"
             />
           </Card>
         </Section>

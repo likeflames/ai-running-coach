@@ -151,16 +151,29 @@ export const TNUM = { fontVariant: ['tabular-nums' as const] };
 
 /* ---------- 颜色推导 ---------- */
 
-/** 恢复等级 1–4 → 颜色 */
+/** 恢复等级 0–4 → 颜色；0 = 数据不足，不能画成「正常」 */
 export function levelColor(t: Theme, level?: number) {
-  return [t.bad, t.warn, t.good, t.accent][(level || 1) - 1] || t.good;
+  if (level === 0 || level === undefined || level === null) return t.text3;
+  return [t.bad, t.warn, t.good, t.accent][level - 1] || t.good;
 }
+
+/**
+ * 状态值（体能 − 疲劳）分区。今日页、数据页、Web 比赛页共用这一套阈值：
+ *   < −10 红 / −10~0 黄 / 0~+10 绿 / > +10 蓝
+ */
+export const TSB_ZONES = [
+  { from: -Infinity, to: -10, tone: 'bad' as const },
+  { from: -10, to: 0, tone: 'warn' as const },
+  { from: 0, to: 10, tone: 'good' as const },
+  { from: 10, to: Infinity, tone: 'accent' as const },
+];
 
 /** 状态值（体能 − 疲劳）→ 颜色 */
 export function tsbColor(t: Theme, tsb: number) {
   if (tsb < -10) return t.bad;
   if (tsb < 0) return t.warn;
-  return t.good;
+  if (tsb <= 10) return t.good;
+  return t.accent;
 }
 
 /** 恢复分 0–100 → 平滑色（红 → 黄 → 绿），不是三档硬跳 */

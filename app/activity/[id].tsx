@@ -14,6 +14,7 @@ interface TrackResp {
   reason?: string;
   count?: number;
   has_gps?: boolean;
+  t?: (number | null)[];
   alt?: (number | null)[];
   hr?: (number | null)[];
   sp?: (number | null)[];
@@ -28,8 +29,9 @@ interface TrackResp {
 
 /** 秒 → 5'32" */
 function mmss(sec: number) {
-  const m = Math.floor(sec / 60);
-  const s = Math.round(sec % 60);
+  const total = Math.round(sec);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
   return `${m}'${String(s).padStart(2, '0')}"`;
 }
 
@@ -81,7 +83,7 @@ export default function ActivityDetail() {
     // 去掉前 3% 与后 1% 的异常值（起步/掐表时速度会跳到 0 或极高）
     const head = Math.floor(raw.length * 0.03);
     const tail = Math.max(head + 10, Math.floor(raw.length * 0.99));
-    return raw.slice(head, tail).map((v) => Math.min(v * 3.6, 30));
+    return raw.slice(head, tail).map((v) => v * 3.6);
   }, [track]);
 
   // 每公里分段：来自 .fit 里的 lap 记录，补详情时写进 metrics_json。
@@ -141,12 +143,29 @@ export default function ActivityDetail() {
   const cadAvg = avg(cad);
   const cadMax = cad.length ? Math.max(...cad) : 0;
 
-  const spAvg = speedKmh.length ? speedKmh.reduce((acc, v) => acc + v, 0) / speedKmh.length : 0;
+  // 平均速度用「总距离 ÷ 总时间」，不再对采样点做等权平均
+  // （有停顿或采样不均时，等权平均会高于真实平均）
+  const summarySpeed =
+    a.distance_km > 0 && a.duration_min > 0 ? a.distance_km / (a.duration_min / 60) : 0;
+  const spAvg = summarySpeed > 0
+    ? summarySpeed
+    : speedKmh.length
+      ? speedKmh.reduce((acc, v) => acc + v, 0) / speedKmh.length
+      : 0;
   const spMax = speedKmh.length ? Math.max(...speedKmh) : 0;
   const hrAvg = hr.length ? hr.reduce((acc, v) => acc + v, 0) / hr.length : 0;
   const hrMax = hr.length ? Math.max(...hr) : 0;
   const altMin = alt.length ? Math.min(...alt) : 0;
   const altMax = alt.length ? Math.max(...alt) : 0;
+
+  // 图表用带 null 的原始序列 + 时间戳：按真实采样时间画 x 轴，
+  // 统计量仍用上面过滤后的数组。
+  const tAll = (track?.t || []) as (number | null)[];
+  const withGaps = (arr: any[] | undefined, keep: (v: number) => boolean) =>
+    (arr || []).map((v) => (typeof v === 'number' && keep(v) ? v : null));
+  const speedSeries = withGaps(track?.sp, (v) => v > 0).map((v) =>
+    v == null ? null : v * 3.6
+  );
 
   return (
     <Screen noTabBar>
@@ -177,10 +196,18 @@ export default function ActivityDetail() {
           {speedKmh.length > 1 ? (
             <>
               <View style={s.sumRow}>
-                <Stat label="平均速度" value={F.num(spAvg, 1)} unit="公里/小时" />
+                <Stat label="平均速度（全程）" value={F.num(spAvg, 1)} unit="公里/小时" />
                 <Stat label="最高速度" value={F.num(spMax, 1)} unit="公里/小时" color={t.accent} />
               </View>
-              <Sparkline values={speedKmh} color={t.accent} height={95} />
+              <Sparkline
+                values={speedSeries}
+                times={tAll}
+                color={t.accent}
+                height={95}
+                baseline="auto"
+                showRange
+                formatValue={(v) => `${v.toFixed(1)}`}
+              />
             </>
           ) : (
             <Text style={s.meta}>这次活动没有速度数据</Text>
@@ -197,7 +224,14 @@ export default function ActivityDetail() {
                 <Stat label="平均心率" value={F.num(hrAvg)} unit="次/分" />
                 <Stat label="最高心率" value={F.num(hrMax)} unit="次/分" color={t.bad} />
               </View>
-              <Sparkline values={hr} color={t.bad} height={95} />
+              <Sparkline
+                values={withGaps(track?.hr, (v) => v > 0)}
+                times={tAll}
+                color={t.bad}
+                height={95}
+                baseline="auto"
+                showRange
+              />
             </>
           ) : (
             <Text style={s.meta}>这次活动没有心率数据</Text>
@@ -215,7 +249,14 @@ export default function ActivityDetail() {
                 <Stat label="最高海拔" value={F.num(altMax)} unit="米" color={t.good} />
                 <Stat label="累计爬升" value={F.num(a.ascent_m ?? detail.metrics?.session?.total_ascent)} unit="米" />
               </View>
-              <Sparkline values={alt} color={t.good} height={95} />
+              <Sparkline
+                values={withGaps(track?.alt, () => true)}
+                times={tAll}
+                color={t.good}
+                height={95}
+                baseline="auto"
+                showRange
+              />
             </>
           ) : (
             <Text style={s.meta}>这次活动没有海拔数据</Text>
@@ -232,7 +273,14 @@ export default function ActivityDetail() {
                 <Stat label="平均步频" value={F.num(cadAvg)} unit="步/分" />
                 <Stat label="最高步频" value={F.num(cadMax)} unit="步/分" color={t.accent} />
               </View>
-              <Sparkline values={cad} color={t.accent} height={90} />
+              <Sparkline
+                values={withGaps(track?.cad, (v) => v > 0)}
+                times={tAll}
+                color={t.accent}
+                height={90}
+                baseline="auto"
+                showRange
+              />
             </>
           ) : (
             <Text style={s.meta}>这次活动没有步频数据</Text>
@@ -282,7 +330,9 @@ export default function ActivityDetail() {
                 <Text style={[s.lapCell, { color: t.text }]}>{F.num(l.km, 2)} km</Text>
                 <Text style={[s.lapCell, { color: t.text }]}>{mmss(l.pace)}/km</Text>
                 <Text style={[s.lapCell, { color: t.text3 }]}>{l.hr ? `${l.hr} 次/分` : '-'}</Text>
-                <Text style={[s.lapCell, { color: t.text3 }]}>{l.asc ? `+${l.asc}m` : '-'}</Text>
+                <Text style={[s.lapCell, { color: t.text3 }]}>
+                  {l.asc === null || l.asc === undefined ? '-' : `+${Math.round(l.asc)}m`}
+                </Text>
               </View>
             ))}
           </Card>

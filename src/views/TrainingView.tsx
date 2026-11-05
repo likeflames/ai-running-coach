@@ -123,7 +123,13 @@ export default function TrainingView({ reloadKey = 0 }: { reloadKey?: number }) 
           </Text>
         ) : null}
         {data.plan_basis ? (
-          <Text style={s.basis}>起点 {data.plan_basis.start_km} 公里/周</Text>
+          <Text style={s.basis}>
+            起点 {data.plan_basis.start_km} 公里/周
+            {data.plan_basis.start_week_km != null &&
+            Math.abs(data.plan_basis.start_week_km - data.plan_basis.start_km) >= 0.2
+              ? ` · 首周实际 ${F.num(data.plan_basis.start_week_km, 1)} 公里`
+              : ''}
+          </Text>
         ) : null}
       </Card>
 
@@ -184,6 +190,9 @@ function WeekCard({
   const s = useStyles();
   const hasToday = week.days.some((d) => d.is_today);
   const km = week.days.map((d) => (d.run && d.run.type !== 'rest' ? Number(d.run.distance_km) || 0 : 0));
+  const adjusted =
+    week.planned_target_km != null &&
+    Math.abs(Number(week.planned_target_km) - Number(week.target_km)) >= 0.1;
   return (
     <Card style={{ padding: 0, overflow: 'hidden', marginBottom: S.sm + 2 }}>
       <Pressable onPress={onToggle} style={s.weekHead}>
@@ -193,7 +202,9 @@ function WeekCard({
             {hasToday ? <Pill text="本周" color={t.accent} /> : null}
           </View>
           <Text style={s.weekMeta}>
-            目标 {F.num(week.target_km, 1)} 公里 · 跑 {week.run_days} 天 · 力量 {week.strength.sessions} 次
+            目标 {F.num(week.target_km, 1)} 公里
+            {adjusted ? `（原 ${F.num(week.planned_target_km, 1)}，手动调整后）` : ''} · 跑{' '}
+            {week.run_days} 天 · 力量 {week.strength.sessions} 次
           </Text>
         </View>
         <Pill text={week.phase_label || zh(PHASE, week.phase, '常规')} color={t.purple} />
@@ -252,6 +263,7 @@ function DayRow({
         s.dayRow,
         { borderTopColor: t.border },
         day.is_today && { backgroundColor: alpha(t.accent, t.dark ? 0.1 : 0.07) },
+        day.past && { opacity: 0.55 },
         last && { borderBottomWidth: 0 },
       ]}
     >
@@ -304,7 +316,9 @@ function DayRow({
         ) : null}
       </View>
 
-      {!isRest ? (
+      {!isRest && day.past ? (
+        <Text style={{ color: t.text3, fontSize: T.caption }}>已过去</Text>
+      ) : !isRest ? (
         <Pressable
           onPress={onCheckin}
           disabled={done}

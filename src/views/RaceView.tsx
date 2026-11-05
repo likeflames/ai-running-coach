@@ -43,9 +43,11 @@ export default function RaceView({ reloadKey = 0 }: { reloadKey?: number }) {
     setLoading(true);
     try {
       const p: any = await api.get(`/api/race/pacing?distance_km=${distance}&strategy=${strategy}`);
-      // 先拿配速，再按时长算补给；并行 + 旧 pacing 会让 10 公里按上一档全马配速算。
+      // 有配速才传给补给接口；没有时让后端明确标记 needs_pace，
+      // 不要静默按 5:00/km 算出一套看起来精确的数字。
+      const pace = Number(p?.base_pace_s_km) || 0;
       const n: any = await api.get(
-        `/api/nutrition/race?distance_km=${distance}&pace_s_km=${Math.round(p?.base_pace_s_km || 300)}`
+        `/api/nutrition/race?distance_km=${distance}${pace ? `&pace_s_km=${Math.round(pace)}` : ''}`
       );
       setPacing(p);
       setNutrition(n);
@@ -103,6 +105,9 @@ export default function RaceView({ reloadKey = 0 }: { reloadKey?: number }) {
               <CardHead title="目标配速" right={<Pill text={`跑步能力值 ${F.num(pacing.vdot, 1)}`} />} />
               <Text style={s.bigPace}>{pacing.base_pace_fmt}</Text>
               <Text style={s.meta}>{pacing.strategy_desc}</Text>
+              <Text style={[s.meta, { marginTop: 2 }]}>
+                三档场景为纯配速参考，不含后程掉速与补给站停留
+              </Text>
               <View style={{ height: S.md }} />
               {pacing.scenarios
                 ? Object.entries(pacing.scenarios).map(([k, v]: any) => (
@@ -133,18 +138,44 @@ export default function RaceView({ reloadKey = 0 }: { reloadKey?: number }) {
                       {F.num(sp.km_from, 1)}–{F.num(sp.km_to, 1)} 公里
                     </Text>
                     <Text style={s.splitPace}>{sp.pace_fmt}</Text>
-                    <Text style={s.splitDelta}>{sp.delta_vs_base}</Text>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={s.splitDelta}>{sp.delta_vs_base}</Text>
+                      {sp.cum_time_fmt ? (
+                        <Text style={{ color: t.text3, fontSize: T.micro }}>
+                          累计 {sp.cum_time_fmt}
+                        </Text>
+                      ) : null}
+                    </View>
                   </View>
                 ))}
               </Card>
+              {pacing.fade_pct ? (
+                <Text style={[s.meta, { marginTop: S.sm }]}>
+                  后半程按 {F.num(pacing.fade_pct, 1)}% 掉速计入分段；累计时间含补给站停留。
+                </Text>
+              ) : (
+                <Text style={[s.meta, { marginTop: S.sm }]}>
+                  当前未设置后程掉速；累计时间含补给站停留（若有）。
+                </Text>
+              )}
             </Section>
           ) : null}
 
           {nutrition?.available ? (
             <Section title="比赛补给">
               <Card>
+                {nutrition.needs_pace ? (
+                  <Text style={[s.meta, { marginBottom: S.sm, color: t.warn }]}>
+                    未提供目标配速，以下按 5:00/km 估算；配速确定后数字会变化。
+                  </Text>
+                ) : null}
                 <View style={s.statRow}>
-                  <Stat label="预计用时" value={F.num(nutrition.estimated_duration_h, 2)} unit="小时" big />
+                  <Stat
+                    label={nutrition.needs_pace ? '预计用时（按 5:00/km）' : '预计用时（目标配速）'}
+                    value={F.num(nutrition.estimated_duration_h, 2)}
+                    unit="小时"
+                    big
+                  />
                   <Stat label="赛中碳水" value={F.num(carbs.total_race_g, 0)} unit="克" />
                 </View>
                 <Bullet

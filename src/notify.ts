@@ -12,6 +12,7 @@
  *   2. iOS 每个 App 最多 64 条待发通知，我们只用 7 条，够
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { F } from './format';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { api, getSessionId } from './api';
@@ -141,7 +142,7 @@ export async function syncReminders(settings?: ReminderSettings): Promise<{ sche
   }
   if (!days.length) return { scheduled: 0, error: '课表里没有数据' };
 
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = F.today();
   const picked = days
     .filter((d) => d.date && d.date >= todayKey)
     .sort((a, b) => a.date.localeCompare(b.date))

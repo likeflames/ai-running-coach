@@ -667,6 +667,10 @@ export interface Recovery {
   sleep_efficiency?: number | null;
   sleep_latency_min?: number | null;
   source?: string | null;
+  /** 今日没有数据、回退到最近一天时为 true */
+  stale?: boolean;
+  days_ago?: number | null;
+  has_data?: boolean;
 }
 
 export interface RecentActivity {
@@ -685,8 +689,20 @@ export interface Fitness {
   atl: number;
   tsb: number;
   weekly_km: number;
-  acwr_ratio: number;
+  weekly_runs?: number;
+  /** ATL/CTL；无跑步数据时为 null，不再用 1.0 伪装成正常 */
+  acwr_ratio: number | null;
+  /** 明确命名：急慢性负荷比，不是周跑量比 */
+  acute_chronic_ratio?: number | null;
+  has_data: boolean;
   status: string;
+  load_model?: {
+    resting_hr: number;
+    max_hr: number;
+    resting_hr_source: string;
+    max_hr_source: string;
+    easy_pace_s_km: number;
+  } | null;
 }
 
 export interface StatusResp {
@@ -789,6 +805,8 @@ export interface ScheduleDay {
   date: string;
   weekday: string;
   is_today: boolean;
+  /** 本周已经过去的日子：仍然返回，用于展示完整一周目标 */
+  past?: boolean;
   run: ScheduleRun | null;
   strength: ScheduleStrength | null;
   /** 教练/用户手动调整过（覆盖自动排课） */
@@ -800,6 +818,10 @@ export interface ScheduleWeek {
   phase: string;
   phase_label: string;
   target_km: number;
+  /** 手动调整前的自动排课目标 */
+  planned_target_km?: number;
+  week_target_km?: number;
+  requested_km?: number;
   run_days: number;
   strength: {
     phase: string;
@@ -828,6 +850,8 @@ export interface PhaseOverview {
 /** 这份课表是按哪些真实数据排的，展示给用户核对 */
 export interface PlanBasis {
   start_km: number;
+  /** 课表实际第一周总里程（可能因质量课固定距离与输入略有差异） */
+  start_week_km?: number;
   start_source: string;
   start_detail: string;
   race_distance_km: number;
@@ -853,6 +877,10 @@ export interface TrainingSchedule {
 export interface WeeklyReport {
   week_start: string;
   week_end: string;
+  counted_through?: string;
+  /** 本周还没结束：对比的是上周同期，而不是完整上周 */
+  partial?: boolean;
+  comparison_basis?: 'same_period' | 'full_week';
   this_week: {
     total_km: number;
     runs: number;
@@ -863,9 +891,16 @@ export interface WeeklyReport {
     other_km: number;
   };
   last_week_km: number;
+  last_week_same_period_km?: number;
   km_change: number;
-  km_change_pct: number;
-  recovery: { avg_hrv: number; avg_sleep: number; avg_body_battery: number };
+  /** 上周为 0 时为 null，不能显示 +0% */
+  km_change_pct: number | null;
+  recovery: {
+    avg_hrv: number | null;
+    avg_sleep: number | null;
+    avg_body_battery: number | null;
+    samples?: { hrv: number; sleep: number; body_battery: number };
+  };
   fitness: Fitness;
   summary: string;
 }

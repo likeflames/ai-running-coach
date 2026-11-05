@@ -17,8 +17,11 @@ export function ActivityList({ pageSize = 8 }: { pageSize?: number }) {
   const s = useStyles();
   const router = useRouter();
   const [items, setItems] = React.useState<Activity[] | null>(null);
+  const [total, setTotal] = React.useState(0);
+  const [hasMore, setHasMore] = React.useState(false);
+  const [loadingMore, setLoadingMore] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
-  const [shown, setShown] = React.useState(pageSize);
+  const page = Math.max(20, pageSize);
 
   // 和「全部活动」页一样，回到这个标签页就重新取：否则同步完数据回来还是旧列表
   useFocusEffect(
@@ -26,9 +29,15 @@ export function ActivityList({ pageSize = 8 }: { pageSize?: number }) {
       let alive = true;
       (async () => {
         try {
-          const d = await api.get<{ activities: Activity[] }>('/api/activities');
+          const d = await api.get<{
+            activities: Activity[];
+            total?: number;
+            has_more?: boolean;
+          }>(`/api/activities?limit=${page}&offset=0`);
           if (alive) {
             setItems(d.activities || []);
+            setTotal(d.total ?? (d.activities || []).length);
+            setHasMore(!!d.has_more);
             setErr(null);
           }
         } catch (e: any) {
@@ -38,8 +47,28 @@ export function ActivityList({ pageSize = 8 }: { pageSize?: number }) {
       return () => {
         alive = false;
       };
-    }, [])
+    }, [page])
   );
+
+  const loadMore = React.useCallback(async () => {
+    if (!items || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const d = await api.get<{
+        activities: Activity[];
+        total?: number;
+        has_more?: boolean;
+      }>(`/api/activities?limit=${page}&offset=${items.length}`);
+      const next = d.activities || [];
+      setItems((cur) => [...(cur || []), ...next]);
+      setTotal(d.total ?? items.length + next.length);
+      setHasMore(!!d.has_more);
+    } catch (e: any) {
+      setErr(e?.message || '加载失败');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [items, loadingMore, page]);
 
   if (err)
     return (
@@ -50,13 +79,14 @@ export function ActivityList({ pageSize = 8 }: { pageSize?: number }) {
   if (!items) return <Loading />;
   if (items.length === 0) return <Empty text="暂无活动记录" />;
 
-  const visible = items.slice(0, shown);
-  const rest = items.length - visible.length;
+  const rest = Math.max(0, total - items.length);
 
   return (
     <View>
-      <Text style={s.hint}>共 {items.length} 条 · 点开可看速度、心率、海拔</Text>
-      {visible.map((a) => (
+      <Text style={s.hint}>
+        共 {total} 条{items.length < total ? ` · 已加载 ${items.length} 条` : ''} · 点开可看速度、心率、海拔
+      </Text>
+      {items.map((a) => (
         <Pressable key={a.id} onPress={() => router.push(`/activity/${a.id}`)}>
           <Card style={{ marginBottom: S.sm }}>
             <View style={s.row}>
@@ -80,13 +110,11 @@ export function ActivityList({ pageSize = 8 }: { pageSize?: number }) {
         </Pressable>
       ))}
 
-      {rest > 0 ? (
-        <Pressable onPress={() => setShown((n) => n + pageSize)} style={s.more}>
-          <Text style={s.moreText}>再看 {Math.min(pageSize, rest)} 条（还有 {rest} 条）</Text>
-        </Pressable>
-      ) : items.length > pageSize ? (
-        <Pressable onPress={() => setShown(pageSize)} style={s.more}>
-          <Text style={s.moreText}>收起，只看最近 {pageSize} 条</Text>
+      {hasMore && rest > 0 ? (
+        <Pressable onPress={loadMore} style={s.more} disabled={loadingMore}>
+          <Text style={s.moreText}>
+            {loadingMore ? '加载中…' : `加载更多（还有 ${rest} 条）`}
+          </Text>
         </Pressable>
       ) : null}
     </View>

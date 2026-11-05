@@ -59,7 +59,7 @@ export default function TodayScreen() {
 
   /** 缓存按账号隔离：换账号不能看到上一个人今天的建议 */
   const adviceKey = React.useMemo(
-    () => `rc.advice.${getSessionId()}.${new Date().toISOString().slice(0, 10)}`,
+    () => `rc.advice.${getSessionId()}.${F.today()}`,
     []
   );
 
@@ -234,6 +234,7 @@ export default function TodayScreen() {
   const sleepScore = Number(rec.sleep_score) || 0;
   const recColor = recoveryColor(t, sleepScore);
   const hasAnyData = !!(rec.date || data.recent_activities?.length);
+  const fitHasData = fit.has_data === true;
 
   /* 长期体能/近期疲劳是负荷点数，没有绝对满分。条本身从 0 量到当前峰值，
    * 浅色带标出近 14 天自己的区间，给数字一个可比的参照。 */
@@ -250,8 +251,18 @@ export default function TodayScreen() {
   };
   const ctlRange = rangeFor(history.map((p) => p.ctl), Number(fit.ctl) || 0);
   const atlRange = rangeFor(history.map((p) => p.atl), Number(fit.atl) || 0);
-  const acwr = Number(fit.acwr_ratio) || 0;
-  const acwrColor = acwr > 1.5 ? t.bad : acwr > 1.3 || (acwr > 0 && acwr < 0.8) ? t.warn : t.good;
+  // 0 不是「正常」，无数据时 acwr_ratio 为 null
+  const acwr = fit.acwr_ratio === null || fit.acwr_ratio === undefined
+    ? null
+    : Number(fit.acwr_ratio);
+  const acwrColor =
+    acwr === null
+      ? t.text3
+      : acwr > 1.5
+        ? t.bad
+        : acwr > 1.3 || acwr < 0.8
+          ? t.warn
+          : t.good;
   const one = (v: number) => F.num(v, 1);
   const two = (v: number) => F.num(v, 2);
 
@@ -262,6 +273,12 @@ export default function TodayScreen() {
     { label: '清醒', value: Number(rec.awake_minutes) || 0, color: t.text3 },
   ];
   const hasStages = stages.some((x) => x.value > 0);
+  const asleepSum = stages[0].value + stages[1].value + stages[2].value;
+  // 分期来自设备、总时长可能来自另一个源；差太多时不画构成环，避免比例误导
+  const stageMismatch =
+    hasStages &&
+    rec.sleep_minutes != null &&
+    Math.abs(asleepSum - Number(rec.sleep_minutes)) > 30;
   // 环心只有 88px，用「7h06」这种短格式，别把「7小时6分」塞进去撑破
   const sleepCenter = rec.sleep_minutes
     ? `${Math.floor(rec.sleep_minutes / 60)}h${String(Math.round(rec.sleep_minutes % 60)).padStart(2, '0')}`
@@ -275,12 +292,12 @@ export default function TodayScreen() {
     has(rec.hrv_status)
       ? { label: '心率变异状态', value: HRV_STATUS_ZH[String(rec.hrv_status)] || String(rec.hrv_status) }
       : null,
-    has(rec.body_battery) ? { label: '身体电量', value: `${F.num(rec.body_battery, 0)}%` } : null,
+    has(rec.body_battery) ? { label: '身体电量（日间峰值）', value: `${F.num(rec.body_battery, 0)}%` } : null,
     has(rec.resting_hr) ? { label: '静息心率', value: `${F.num(rec.resting_hr, 0)} 次/分` } : null,
     has(rec.night_hr) ? { label: '夜间心率', value: `${F.num(rec.night_hr, 0)} 次/分` } : null,
     has(rec.readiness_score) ? { label: '训练准备度', value: F.num(rec.readiness_score, 0) } : null,
     has(rec.recovery_time_min) ? { label: '恢复时间', value: F.duration(rec.recovery_time_min) } : null,
-    has(rec.acute_load) ? { label: '急性负荷', value: F.num(rec.acute_load, 0) } : null,
+    has(rec.acute_load) ? { label: '佳明急性负荷（厂商算法）', value: F.num(rec.acute_load, 0) } : null,
     has(rec.vo2max) ? { label: '最大摄氧量', value: F.num(rec.vo2max, 1) } : null,
     has(rec.stress_avg) ? { label: '日间压力', value: F.num(rec.stress_avg, 0) } : null,
     has(rec.sleep_stress_avg) ? { label: '睡眠压力', value: F.num(rec.sleep_stress_avg, 0) } : null,
@@ -309,7 +326,7 @@ export default function TodayScreen() {
       ) : null}
 
       {/* ---------- 体能状态：首屏主卡 ---------- */}
-      {hasAnyData ? (
+      {hasAnyData && fitHasData ? (
         <Card>
           <View style={s.cardTop}>
             <Text style={[s.eyebrow, { color: t.text2 }]}>体能状态</Text>
@@ -350,21 +367,38 @@ export default function TodayScreen() {
             color={t.warn}
             format={one}
           />
-          <Bullet
-            label="负荷比（近 7 天 / 42 天）"
-            value={acwr}
-            min={0}
-            max={2}
-            band={{ from: 0.8, to: 1.3 }}
-            color={acwrColor}
-            format={two}
-          />
+          {acwr === null ? (
+            <Text style={[s.foot, { color: t.text3 }]}>
+              急慢性负荷比：暂无数据（至少需要一次跑步）
+            </Text>
+          ) : (
+            <Bullet
+              label="急慢性负荷比（7 天 / 42 天）"
+              value={acwr}
+              min={0}
+              max={2}
+              band={{ from: 0.8, to: 1.3 }}
+              color={acwrColor}
+              format={two}
+            />
+          )}
 
           <Text style={[s.foot, { color: t.text3 }]}>本周跑量 {F.num(fit.weekly_km, 1)} 公里</Text>
           <Fold label="指标定义">
             <Text style={s.def}>状态值 = 长期体能 − 近期疲劳；浅色带是近 14 天你自己的区间。</Text>
-            <Text style={s.def}>长期体能按 42 天、近期疲劳按 7 天指数平均；负荷比参考 0.8–1.3。</Text>
+            <Text style={s.def}>长期体能按 42 天、近期疲劳按 7 天指数平均。</Text>
+            <Text style={s.def}>
+              急慢性负荷比 = 近期疲劳 ÷ 长期体能，参考 0.8–1.3。训练页的「周跑量比」是另一个指标（近 7 天跑量 ÷ 近 4 个完整周平均），两者不能混看。
+            </Text>
           </Fold>
+        </Card>
+      ) : null}
+
+      {hasAnyData && !fitHasData ? (
+        <Card>
+          <Text style={[s.emptyBody, { color: t.text2 }]}>
+            还没有跑步负荷数据。同步几次跑步后，这里会显示长期体能、近期疲劳和急慢性负荷比。
+          </Text>
         </Card>
       ) : null}
 
@@ -372,7 +406,11 @@ export default function TodayScreen() {
       <Card>
         <View style={s.cardTop}>
           <Text style={[s.eyebrow, { color: t.text2 }]}>恢复</Text>
-          <Text style={[s.cardDate, { color: t.text3 }]}>{rec.date || F.today()}</Text>
+          <Text style={[s.cardDate, { color: t.text3 }]}>
+            {rec.stale
+              ? `最近 ${rec.date}${rec.days_ago ? `（${rec.days_ago} 天前）` : ''}`
+              : rec.date || F.today()}
+          </Text>
         </View>
 
         {hasStages ? (
@@ -385,12 +423,30 @@ export default function TodayScreen() {
               caption="睡眠评分"
               format={() => (sleepScore ? String(Math.round(sleepScore)) : '–')}
             />
-            <SegmentRing
-              size={112}
-              center={sleepCenter}
-              caption="睡眠时长"
-              segments={stages.map((x) => ({ value: x.value, color: x.color, label: x.label }))}
-            />
+            {stageMismatch ? (
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={[s.heroNum, { color: t.text }]}>{sleepCenter}</Text>
+                <Text style={[s.heroNote, { color: t.text2 }]}>睡眠时长</Text>
+                <Text
+                  style={{
+                    color: t.text3,
+                    fontSize: T.caption,
+                    textAlign: 'center',
+                    marginTop: 4,
+                    lineHeight: 18,
+                  }}
+                >
+                  分期合计 {Math.round(asleepSum)} 分，与总时长不一致，暂不显示构成
+                </Text>
+              </View>
+            ) : (
+              <SegmentRing
+                size={112}
+                center={sleepCenter}
+                caption="睡眠时长"
+                segments={stages.map((x) => ({ value: x.value, color: x.color, label: x.label }))}
+              />
+            )}
           </View>
         ) : (
           <View style={s.heroRow}>
@@ -401,7 +457,7 @@ export default function TodayScreen() {
           </View>
         )}
 
-        {hasStages ? (
+        {hasStages && !stageMismatch ? (
           <View style={s.legendRow}>
             <RingLegend items={stageLegend(stages.slice(0, 2))} />
             <RingLegend items={stageLegend(stages.slice(2, 4))} />
@@ -427,8 +483,11 @@ export default function TodayScreen() {
         <Card tint={adv.level ? levelColor(t, adv.level) : undefined}>
           <View style={s.cardTop}>
             <Text style={[s.eyebrow, { color: t.text2 }]}>今天怎么练</Text>
-            {adv.level ? (
-              <Pill text={['休息', '轻松', '按计划', '可加量'][adv.level - 1] || ''} color={levelColor(t, adv.level)} />
+            {adv.level !== undefined && adv.level !== null ? (
+              <Pill
+                text={['数据不足', '休息', '轻松', '按计划', '可加量'][adv.level] || ''}
+                color={levelColor(t, adv.level)}
+              />
             ) : null}
           </View>
           <Text style={[s.adviceText, { color: levelColor(t, adv.level) }]}>{adv.advice}</Text>
