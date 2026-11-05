@@ -217,6 +217,10 @@ export default function TodayScreen() {
     { label: '清醒', value: Number(rec.awake_minutes) || 0, color: t.text3 },
   ];
   const hasStages = stages.some((x) => x.value > 0);
+  // 环心只有 88px，用「7h06」这种短格式，别把「7小时6分」塞进去撑破
+  const sleepCenter = rec.sleep_minutes
+    ? `${Math.floor(rec.sleep_minutes / 60)}h${String(Math.round(rec.sleep_minutes % 60)).padStart(2, '0')}`
+    : '–';
   const stageLegend = (arr: typeof stages) =>
     arr.map((x) => ({ color: x.color, label: x.label, value: `${Math.round(x.value)} 分` }));
 
@@ -363,7 +367,7 @@ export default function TodayScreen() {
             />
             <SegmentRing
               size={112}
-              center={F.duration(rec.sleep_minutes)}
+              center={sleepCenter}
               caption="睡眠时长"
               segments={stages.map((x) => ({ value: x.value, color: x.color, label: x.label }))}
             />
