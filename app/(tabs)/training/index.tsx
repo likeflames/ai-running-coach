@@ -11,7 +11,8 @@ import {
 import { Screen, Card, CardHead, Section, Loading, ErrorBox, Empty, Pill, Stat, Btn } from '../../../src/ui';
 import { S, T, R, TNUM, alpha, type Theme } from '../../../src/theme';
 import { makeStyles, useTheme } from '../../../src/theme-provider';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { PbBadge, PersonalizationCard } from '../../../src/personalize';
 import { F } from '../../../src/format';
 import { PHASE, PACE_ZONE, WORKOUT_TYPE, restLabel, setsLabel, zh } from '../../../src/labels';
 
@@ -51,9 +52,9 @@ export default function TrainingScreen() {
     }
   }, []);
 
-  React.useEffect(() => {
-    load();
-  }, [load]);
+  // 标签页常驻，useEffect 只在挂载跑一次：填完档案返回时不会刷新，
+  // 会一直停在旧的「需要 5 公里成绩」提示上。每次获得焦点都重拉。
+  useFocusEffect(React.useCallback(() => { load(); }, [load]));
 
   const checkin = (day: string) => {
     Alert.prompt?.('打卡', '实际跑了多少公里？（可留空）', async (km) => {
@@ -103,7 +104,7 @@ export default function TrainingScreen() {
         <Card>
           <CardHead title="还没有训练计划" />
           <Text style={s.summary}>
-            {(data as any).reason || '先把目标、每周训练天数和 5 公里成绩填上，才排得出课表。'}
+            {(data as any).reason || '课表暂时读不出来，下拉重试或稍后再试。'}
           </Text>
           <View style={{ height: S.md }} />
           <Btn title="去完善资料" onPress={() => router.push('/profile')} primary small />
@@ -118,6 +119,9 @@ export default function TrainingScreen() {
 
   return (
     <Screen>
+      <PbBadge pb={(data as any).pb} />
+      <PersonalizationCard scope="training" />
+
       {/* 概览 */}
       <Card>
         <CardHead title="训练计划" right={<Pill text={`${data.weeks.length} 周`} />} />

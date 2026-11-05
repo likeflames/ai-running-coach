@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { PbBadge, PersonalizationCard } from '../../../src/personalize';
 import { api } from '../../../src/api';
 import { Screen, Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat, Pill, Hint, Btn } from '../../../src/ui';
 import { Legend, LineChart } from '../../../src/charts';
@@ -52,17 +53,18 @@ export default function RaceScreen() {
     }
   }, [distance, strategy]);
 
-  React.useEffect(() => {
-    load();
-    // 仅随距离/策略变化重新计算
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [distance, strategy]);
+  // 每次切回比赛页都重拉：档案改完返回时，配速和成绩来源要跟着更新。
+  // 距离 / 策略变化仍由 load 的依赖变化触发。
+  useFocusEffect(React.useCallback(() => { load(); }, [load]));
 
   /** 预测曲线：后台按天给出，最后一天就是比赛日 */
   const fc: any[] = forecast?.series || [];
 
   return (
     <Screen>
+      <PbBadge pb={pacing?.pb} />
+      <PersonalizationCard scope="race" />
+
       {/* 距离 / 策略 */}
       <Card>
         <Text style={s.label}>比赛距离</Text>
@@ -87,14 +89,15 @@ export default function RaceScreen() {
         <>
           {/* 新用户没填 5 公里成绩时，后端只回一句「缺资料」。
               与其显示「暂无配速数据」让人以为是坏了，不如直接给个入口。 */}
-          {pacing?.needs_profile || nutrition?.needs_profile ? (
+          {/* 配速不再被 5 公里成绩卡住；这里只剩补给需要体重 */}
+          {nutrition?.needs_profile ? (
             <Card>
-              <CardHead title="还差一步" />
+              <CardHead title="补给方案还差一步" />
               <Text style={s.meta}>
-                {pacing?.reason || nutrition?.reason || '先把个人资料填完整，才能算出配速和补给'}
+                {nutrition.reason || '填一下体重，才能算出比赛日要补多少碳水和电解质'}
               </Text>
               <View style={{ height: S.md }} />
-              <Btn title="去完善资料" onPress={() => router.push('/profile')} primary small />
+              <Btn title="去填体重" onPress={() => router.push('/profile')} primary small />
             </Card>
           ) : null}
 

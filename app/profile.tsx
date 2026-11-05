@@ -169,6 +169,38 @@ export default function ProfileScreen() {
         <View style={{ paddingHorizontal: S.md, marginTop: S.md }}>
           <Btn title={saving ? '保存中…' : '保存'} onPress={save} primary disabled={saving} />
         </View>
+
+        <View style={{ paddingHorizontal: S.md, marginTop: S.sm }}>
+          <Btn
+            title="从历史跑步记录自动识别 5 公里成绩"
+            small
+            disabled={saving}
+            onPress={async () => {
+              setSaving(true);
+              setErr('');
+              try {
+                const r = await api.post<any>('/api/profile/five-k/auto', {});
+                if (!r.ok) {
+                  setErr(r.reason || '没找到可用的跑步记录');
+                  return;
+                }
+                setF({ ...f, five_k_pb_min: r.pb.text });
+                Alert.alert(
+                  '识别成功',
+                  `${r.pb.text}（${r.pb.detail}）\n已填进上面的输入框，点「保存」确认即可。`,
+                );
+              } catch (e: any) {
+                setErr(e?.message || '识别失败');
+              } finally {
+                setSaving(false);
+              }
+            }}
+          />
+          <Text style={{ color: t.text3, fontSize: 11, marginTop: 6, lineHeight: 16 }}>
+            从已同步的活动里找最快的 5 公里；没有正好 5 公里时，用 3–21 km 的记录折算。
+            手填的成绩不会被日常同步覆盖。
+          </Text>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
