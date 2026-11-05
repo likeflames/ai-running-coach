@@ -29,6 +29,18 @@ interface CredField {
   masked: string;
 }
 
+/** 后台补详情的进度（GET /api/activities/detail-status） */
+interface DetailStatus {
+  running: boolean;
+  total: number;
+  done: number;
+  saved: number;
+  no_gps: number;
+  failed: number;
+  percent: number;
+  message: string;
+}
+
 const CAP: Record<string, string> = {
   recovery: '恢复',
   activity: '训练',
@@ -49,6 +61,7 @@ export default function SourcesScreen() {
   const [editing, setEditing] = React.useState<string | null>(null);
   const [credFields, setCredFields] = React.useState<CredField[]>([]);
   const [form, setForm] = React.useState<Record<string, string>>({});
+  const [detail, setDetail] = React.useState<DetailStatus | null>(null);
 
   const load = React.useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -63,11 +76,48 @@ export default function SourcesScreen() {
     }
   }, []);
 
+  const loadDetail = React.useCallback(async () => {
+    try {
+      setDetail(await api.get<DetailStatus>('/api/activities/detail-status'));
+    } catch {
+      // 进度查不到不影响主流程，静默忽略
+    }
+  }, []);
+
   useFocusEffect(
     React.useCallback(() => {
       load(true);
-    }, [load])
+      loadDetail();
+    }, [load, loadDetail])
   );
+
+  // 补详情是后台跑的，任务在跑的时候每 3 秒刷一次进度；
+  // 跑完就停，不在后台空转浪费电。
+  React.useEffect(() => {
+    if (!detail?.running) return;
+    const timer = setInterval(loadDetail, 3000);
+    return () => clearInterval(timer);
+  }, [detail?.running, loadDetail]);
+
+  /** 手动启动「补齐所有活动的秒级明细」 */
+  const startDetailSync = async (src: SourceInfo) => {
+    setBusy(src.id);
+    try {
+      const r = await api.post<DetailStatus & { started: boolean }>(
+        '/api/activities/detail-sync',
+        {},
+        30000
+      );
+      setDetail(r);
+      if (!r?.started && r?.message) {
+        Alert.alert('不用补', r.message);
+      }
+    } catch (e: any) {
+      Alert.alert('启动失败', e?.message || '稍后再试');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const connect = async (src: SourceInfo) => {
     setBusy(src.id);
@@ -100,7 +150,10 @@ export default function SourcesScreen() {
       if (act != null) parts.push(`新增 ${act} 条训练`);
       if (rec) parts.push(`更新 ${rec} 天恢复数据`);
       if (pb?.updated) parts.push(`识别到 5 公里成绩 ${pb.text}`);
+      // 详情（秒级心率/配速/海拔/步频/功率）在后台补，这里只提示一句
+      if (r?.detail?.started) parts.push('正在后台补详情');
       Alert.alert('同步完成', `${src.name}：${parts.length ? parts.join('，') : '没有新数据'}。`);
+      if (r?.detail) setDetail(r.detail);
       await load(true);
     } catch (e: any) {
       Alert.alert('同步没成功', e?.message || '稍后再试');
@@ -313,6 +366,18 @@ export default function SourcesScreen() {
 
             {src.last_error ? <Text style={[s.meta, { color: t.bad }]}>{src.last_error}</Text> : null}
 
+            {/* 佳明的详情（秒级心率/配速/海拔/步频/功率）是逐条下载原始 .fit 换来的，
+                几百条要跑十几分钟，所以放后台跑，这里只显示进度。 */}
+            {src.id === 'garmin' && src.connected ? (
+              detail?.running ? (
+                <Text style={[s.meta, { color: t.accent }]}>
+                  正在补详情 {detail.done}/{detail.total}（{detail.percent}%）· 可以退出这个页面，后台会继续
+                </Text>
+              ) : detail?.message ? (
+                <Text style={[s.meta, { color: t.text3 }]}>明细：{detail.message}</Text>
+              ) : null
+            ) : null}
+
             <View style={s.actions}>
               {push ? (
                 // 推送型数据源没有「连接」这个动作，只有一次性的配置说明
@@ -332,6 +397,14 @@ export default function SourcesScreen() {
               ) : (
                 <>
                   <Btn title="同步" onPress={() => sync(src)} disabled={busy === src.id} primary small />
+                  {src.id === 'garmin' ? (
+                    <Btn
+                      title={detail?.running ? '补详情中…' : '补全详情'}
+                      onPress={() => startDetailSync(src)}
+                      disabled={busy === src.id || !!detail?.running}
+                      small
+                    />
+                  ) : null}
                   <Btn title="断开" onPress={() => disconnect(src)} disabled={busy === src.id} small />
                 </>
               )}

@@ -13,9 +13,24 @@ interface TrackResp {
   available: boolean;
   reason?: string;
   count?: number;
+  has_gps?: boolean;
   alt?: (number | null)[];
   hr?: (number | null)[];
   sp?: (number | null)[];
+  cad?: (number | null)[];
+  tmp?: (number | null)[];
+  pwr?: (number | null)[];
+  vo?: (number | null)[];
+  vr?: (number | null)[];
+  st?: (number | null)[];
+  sl?: (number | null)[];
+}
+
+/** 秒 → 5'32" */
+function mmss(sec: number) {
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}'${String(s).padStart(2, '0')}"`;
 }
 
 export default function ActivityDetail() {
@@ -69,8 +84,34 @@ export default function ActivityDetail() {
     return raw.slice(head, tail).map((v) => Math.min(v * 3.6, 30));
   }, [track]);
 
-  if (loading) return <Loading />;
-  if (err)
+  // 每公里分段：来自 .fit 里的 lap 记录，补详情时写进 metrics_json。
+  // 注意 fit 的 avg_running_cadence 已经是步/分，avg_cadence 是单脚圈数要 ×2。
+  const laps = React.useMemo(() => {
+    const raw = (detail?.metrics?.laps || []) as any[];
+    const out: { km: number; pace: number; hr: number | null; cad: number | null; asc: number | null }[] = [];
+    raw.forEach((l) => {
+      const dist = Number(l?.total_distance ?? 0);
+      const dur = Number(l?.total_timer_time ?? l?.total_elapsed_time ?? 0);
+      if (!(dist > 50) || !(dur > 0)) return;
+      const km = dist / 1000;
+      const cadence =
+        l?.avg_running_cadence != null
+          ? Number(l.avg_running_cadence)
+          : l?.avg_cadence != null
+            ? Number(l.avg_cadence) * 2
+            : null;
+      out.push({
+        km,
+        pace: dur / km,
+        hr: l?.avg_heart_rate != null ? Number(l.avg_heart_rate) : null,
+        cad: cadence,
+        asc: l?.total_ascent != null ? Number(l.total_ascent) : null,
+      });
+    });
+    return out;
+  }, [detail]);
+
+  if (loading) return <Loading />;  if (err)
     return (
       <Screen noTabBar>
         <ErrorBox message={err} onRetry={load} />
@@ -88,6 +129,17 @@ export default function ActivityDetail() {
 
   const hr = (track?.hr || []).filter((v): v is number => typeof v === 'number' && v > 0);
   const alt = (track?.alt || []).filter((v): v is number => typeof v === 'number');
+  const cad = (track?.cad || []).filter((v): v is number => typeof v === 'number' && v > 0);
+  const pwr = (track?.pwr || []).filter((v): v is number => typeof v === 'number' && v > 0);
+  const tmp = (track?.tmp || []).filter((v): v is number => typeof v === 'number');
+  const vo = (track?.vo || []).filter((v): v is number => typeof v === 'number' && v > 0);
+  const vr = (track?.vr || []).filter((v): v is number => typeof v === 'number' && v > 0);
+  const st = (track?.st || []).filter((v): v is number => typeof v === 'number' && v > 0);
+  const sl = (track?.sl || []).filter((v): v is number => typeof v === 'number' && v > 0);
+
+  const avg = (arr: number[]) => (arr.length ? arr.reduce((a, v) => a + v, 0) / arr.length : 0);
+  const cadAvg = avg(cad);
+  const cadMax = cad.length ? Math.max(...cad) : 0;
 
   const spAvg = speedKmh.length ? speedKmh.reduce((acc, v) => acc + v, 0) / speedKmh.length : 0;
   const spMax = speedKmh.length ? Math.max(...speedKmh) : 0;
@@ -170,6 +222,72 @@ export default function ActivityDetail() {
           )}
         </Card>
       </Section>
+
+      {/* 步频 */}
+      <Section title="步频">
+        <Card>
+          {cad.length > 1 ? (
+            <>
+              <View style={s.sumRow}>
+                <Stat label="平均步频" value={F.num(cadAvg)} unit="步/分" />
+                <Stat label="最高步频" value={F.num(cadMax)} unit="步/分" color={t.accent} />
+              </View>
+              <Sparkline values={cad} color={t.accent} height={90} />
+            </>
+          ) : (
+            <Text style={s.meta}>这次活动没有步频数据</Text>
+          )}
+        </Card>
+      </Section>
+
+      {/* 跑步动态：只有佳明的高阶手表/心率带才有这些字段，有才显示 */}
+      {vo.length > 1 || vr.length > 1 || st.length > 1 || sl.length > 1 ? (
+        <Section title="跑步动态">
+          <Card>
+            <View style={s.sumRow}>
+              <Stat label="垂直振幅" value={F.num(avg(vo), 1)} unit="毫米" />
+              <Stat label="垂直步幅比" value={F.num(avg(vr), 1)} unit="%" />
+              <Stat label="触地时间" value={F.num(avg(st))} unit="毫秒" />
+            </View>
+            <View style={[s.sumRow, { marginBottom: 0 }]}>
+              <Stat label="步幅" value={F.num(avg(sl) / 10, 0)} unit="厘米" />
+            </View>
+          </Card>
+        </Section>
+      ) : null}
+
+      {/* 功率 / 温度：骑行台、跑步功率计或高温天才有意义 */}
+      {pwr.length > 1 || tmp.length > 1 ? (
+        <Section title="功率与温度">
+          <Card>
+            <View style={s.sumRow}>
+              {pwr.length > 1 ? <Stat label="平均功率" value={F.num(avg(pwr))} unit="瓦" /> : null}
+              {pwr.length > 1 ? <Stat label="最高功率" value={F.num(Math.max(...pwr))} unit="瓦" color={t.accent} /> : null}
+              {tmp.length > 1 ? <Stat label="平均温度" value={F.num(avg(tmp), 1)} unit="℃" /> : null}
+            </View>
+          </Card>
+        </Section>
+      ) : null}
+
+      {/* 每公里分段 */}
+      {laps.length ? (
+        <Section title="分段">
+          <Card>
+            {laps.map((l, i) => (
+              <View
+                key={i}
+                style={[s.lapRow, { borderTopColor: t.border, borderTopWidth: i === 0 ? 0 : 0.5 }]}
+              >
+                <Text style={[s.lapIdx, { color: t.text3 }]}>{i + 1}</Text>
+                <Text style={[s.lapCell, { color: t.text }]}>{F.num(l.km, 2)} km</Text>
+                <Text style={[s.lapCell, { color: t.text }]}>{mmss(l.pace)}/km</Text>
+                <Text style={[s.lapCell, { color: t.text3 }]}>{l.hr ? `${l.hr} 次/分` : '-'}</Text>
+                <Text style={[s.lapCell, { color: t.text3 }]}>{l.asc ? `+${l.asc}m` : '-'}</Text>
+              </View>
+            ))}
+          </Card>
+        </Section>
+      ) : null}
     </Screen>
   );
 }
@@ -180,4 +298,7 @@ const useStyles = makeStyles((t: Theme) => ({
   meta: { color: t.text3, fontSize: T.micro + 1, marginTop: S.xs, lineHeight: 18 },
   statRow: { flexDirection: 'row', gap: S.sm },
   sumRow: { flexDirection: 'row', gap: S.sm, marginBottom: S.sm },
+  lapRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
+  lapIdx: { width: 22, fontSize: T.micro + 1 },
+  lapCell: { flex: 1, fontSize: T.caption },
 }));
