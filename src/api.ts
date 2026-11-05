@@ -599,6 +599,25 @@ export async function adviceStream(
   throw lastError || new Error('无法连接服务器');
 }
 
+export interface ChatHistoryItem {
+  role: string;
+  content: string;
+  at?: string | null;
+}
+
+/** 拉回服务端保存的对话记录：App 被杀掉重开、换设备后不再从零开始 */
+export async function chatHistory(limit = 50): Promise<ChatHistoryItem[]> {
+  await ready;
+  const r = await api.get<{ messages?: ChatHistoryItem[] }>(`/api/chat/history?limit=${limit}`);
+  return r?.messages || [];
+}
+
+/** 清空服务端对话记录（本地也要同步清） */
+export async function clearChatHistory(): Promise<void> {
+  await ready;
+  await api.del('/api/chat/history');
+}
+
 /**
  * 流式对话：逐段回调思维过程 / 正文。
  * 连接失败会自动换下一个候选地址；一旦开始输出就不再切换（避免内容重复）。
@@ -696,6 +715,30 @@ export interface Fitness {
   acute_chronic_ratio?: number | null;
   has_data: boolean;
   status: string;
+  /** 近 7 天交叉训练摘要；没有交叉训练时为 null */
+  cross_training?: {
+    sessions_7d: number;
+    minutes_7d: number;
+    load_7d: number;
+    /** 其中按练后 RPE 计算的次数与负荷 */
+    srpe_sessions_7d: number;
+    srpe_load_7d: number;
+    atl: number;
+    ctl: number;
+    by_type: {
+      label: string;
+      sessions: number;
+      minutes: number;
+      load: number;
+      srpe_sessions: number;
+    }[];
+    note: string;
+  } | null;
+  /** 合并疲劳：跑步 ATL + 按类型折减的交叉训练 ATL */
+  combined_atl?: number;
+  /** 状态值 = 跑步 CTL − 合并疲劳（交叉训练不抵扣跑步体能） */
+  combined_tsb?: number;
+  combined_status?: string;
   load_model?: {
     resting_hr: number;
     max_hr: number;
@@ -729,6 +772,8 @@ export interface Activity {
   source: string;
   type: string;
   has_track: boolean;
+  /** 练后主观用力 1-10，仅非跑步活动会填 */
+  rpe?: number | null;
   max_hr?: number | null;
   notes?: string | null;
 }

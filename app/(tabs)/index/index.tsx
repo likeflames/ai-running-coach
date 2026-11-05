@@ -25,6 +25,8 @@ interface FitnessPoint {
   ctl: number;
   atl: number;
   tsb: number;
+  combined_atl?: number;
+  combined_tsb?: number;
   weekly_km: number;
 }
 
@@ -235,6 +237,10 @@ export default function TodayScreen() {
   const recColor = recoveryColor(t, sleepScore);
   const hasAnyData = !!(rec.date || data.recent_activities?.length);
   const fitHasData = fit.has_data === true;
+  // 疲劳用合并口径：跑步 + 按类型折减的交叉训练；体能仍只算跑步
+  const fitAtl = Number(fit.combined_atl ?? fit.atl) || 0;
+  const fitTsb = Number(fit.combined_tsb ?? fit.tsb) || 0;
+  const cross = fit.cross_training || null;
 
   /* 长期体能/近期疲劳是负荷点数，没有绝对满分。条本身从 0 量到当前峰值，
    * 浅色带标出近 14 天自己的区间，给数字一个可比的参照。 */
@@ -250,7 +256,10 @@ export default function TodayScreen() {
     };
   };
   const ctlRange = rangeFor(history.map((p) => p.ctl), Number(fit.ctl) || 0);
-  const atlRange = rangeFor(history.map((p) => p.atl), Number(fit.atl) || 0);
+  const atlRange = rangeFor(
+    history.map((p) => p.combined_atl ?? p.atl),
+    fitAtl
+  );
   // 0 不是「正常」，无数据时 acwr_ratio 为 null
   const acwr = fit.acwr_ratio === null || fit.acwr_ratio === undefined
     ? null
@@ -334,12 +343,12 @@ export default function TodayScreen() {
           </View>
 
           <Gauge
-            value={Number(fit.tsb) || 0}
+            value={fitTsb}
             min={-30}
             max={30}
             height={162}
-            color={tsbColor(t, fit.tsb || 0)}
-            caption="状态值 · 体能 − 疲劳"
+            color={tsbColor(t, fitTsb)}
+            caption="状态值 · 跑步体能 − 合并疲劳"
             format={(v) => `${v > 0 ? '+' : ''}${F.num(v, 1)}`}
             zones={[
               { from: -30, to: -10, color: t.bad },
@@ -359,8 +368,8 @@ export default function TodayScreen() {
             format={one}
           />
           <Bullet
-            label="近期疲劳（7 天）"
-            value={Number(fit.atl) || 0}
+            label="近期疲劳（7 天，含交叉）"
+            value={fitAtl}
             min={atlRange.min}
             max={atlRange.max}
             band={atlRange.band}
@@ -373,7 +382,7 @@ export default function TodayScreen() {
             </Text>
           ) : (
             <Bullet
-              label="急慢性负荷比（7 天 / 42 天）"
+              label="跑步负荷比（7 天 / 42 天）"
               value={acwr}
               min={0}
               max={2}
@@ -383,12 +392,26 @@ export default function TodayScreen() {
             />
           )}
 
+          {cross && cross.sessions_7d > 0 ? (
+            <Text style={[s.foot, { color: t.text2 }]}>
+              交叉训练 {cross.sessions_7d} 次 · {F.num(cross.minutes_7d, 0)} 分钟，折算疲劳{' '}
+              {F.num(cross.atl, 1)}
+              {cross.srpe_sessions_7d > 0 ? ` · ${cross.srpe_sessions_7d} 次按 RPE` : ''}
+            </Text>
+          ) : null}
           <Text style={[s.foot, { color: t.text3 }]}>本周跑量 {F.num(fit.weekly_km, 1)} 公里</Text>
           <Fold label="指标定义">
-            <Text style={s.def}>状态值 = 长期体能 − 近期疲劳；浅色带是近 14 天你自己的区间。</Text>
-            <Text style={s.def}>长期体能按 42 天、近期疲劳按 7 天指数平均。</Text>
             <Text style={s.def}>
-              急慢性负荷比 = 近期疲劳 ÷ 长期体能，参考 0.8–1.3。训练页的「周跑量比」是另一个指标（近 7 天跑量 ÷ 近 4 个完整周平均），两者不能混看。
+              状态值 = 跑步体能 − 合并疲劳（跑步 + 交叉训练）；浅色带是近 14 天你自己的区间。
+            </Text>
+            <Text style={s.def}>
+              长期体能按 42 天算跑步负荷；近期疲劳按 7 天算跑步，再叠加按类型折减的交叉训练。
+            </Text>
+            <Text style={s.def}>
+              跑步负荷比只含跑步：近期跑步疲劳 ÷ 长期跑步体能，参考 0.8–1.3。交叉训练计入疲劳，但不计入跑步体能。
+            </Text>
+            <Text style={s.def}>
+              交叉训练只计入有心率的记录，并按类型折减：骑行 0.6、游泳 0.5、力量 0.35。力量课心率会低估真实负荷，所以权重更低。
             </Text>
           </Fold>
         </Card>
@@ -397,7 +420,9 @@ export default function TodayScreen() {
       {hasAnyData && !fitHasData ? (
         <Card>
           <Text style={[s.emptyBody, { color: t.text2 }]}>
-            还没有跑步负荷数据。同步几次跑步后，这里会显示长期体能、近期疲劳和急慢性负荷比。
+            {cross && cross.sessions_7d > 0
+              ? `还没有跑步负荷数据；近 7 天有 ${cross.sessions_7d} 次交叉训练，但只有跑步才计入体能。`
+              : '还没有跑步负荷数据。同步几次跑步后，这里会显示长期体能、近期疲劳和跑步负荷比。'}
           </Text>
         </Card>
       ) : null}

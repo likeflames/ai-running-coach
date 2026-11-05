@@ -97,6 +97,20 @@ export function zh(table: Record<string, string>, key?: string | null, fallback 
   return table[key] || fallback;
 }
 
+/** 活动类型是否属于跑步（口径与后端 activity_types.is_running 一致） */
+const NON_RUN_MARKERS = [
+  'ride', 'bike', 'cycl', 'swim', 'walk', 'hik', 'strength', 'weight',
+  'cardio', 'row', 'elliptical', 'yoga', 'pilates', 'ski', 'skate',
+  '骑行', '单车', '游泳', '步行', '徒步', '力量', '瑜伽', '划船', '滑雪',
+];
+
+export function isRunningType(type?: string | null) {
+  const t = (type || '').trim().toLowerCase();
+  if (!t) return false;
+  if (NON_RUN_MARKERS.some((m) => t.includes(m))) return false;
+  return t.includes('run') || ['跑步', '越野跑', '跑步机', '室内跑', '田径场跑', '路跑', '超马'].some((k) => t.includes(k));
+}
+
 /** 秒 → 1分30秒 */
 export function restLabel(s?: number | null) {
   if (!s) return '-';

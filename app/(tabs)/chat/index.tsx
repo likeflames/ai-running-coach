@@ -11,9 +11,10 @@ import {
   Keyboard,
   Animated,
   Easing,
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { api, chatStream, ChatEvent } from '../../../src/api';
+import { api, chatStream, ChatEvent, chatHistory, clearChatHistory } from '../../../src/api';
 import { Markdown } from '../../../src/markdown';
 import { Glass } from '../../../src/glass';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -119,10 +120,35 @@ export default function ChatScreen() {
       .catch(() => {});
   }, []);
 
+  /** 只在本次 App 运行内恢复一次，避免每次切回页面都覆盖正在进行的对话 */
+  const restored = React.useRef(false);
+
+  const restoreHistory = React.useCallback(async () => {
+    if (restored.current) return;
+    restored.current = true;
+    try {
+      const list = await chatHistory(50);
+      if (!list.length) return;
+      const restoredMsgs: Msg[] = list
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m, i) => ({
+          id: `h${i}`,
+          role: m.role as 'user' | 'assistant',
+          text: m.content,
+          phase: 'done' as const,
+        }));
+      // 用户已经开始新对话时，别把历史插到前面
+      setMsgs((cur) => (cur.length ? cur : restoredMsgs));
+    } catch {
+      /* 拉不到就当新对话，不影响发消息 */
+    }
+  }, []);
+
   useFocusEffect(
     React.useCallback(() => {
       loadMeta();
-    }, [loadMeta])
+      restoreHistory();
+    }, [loadMeta, restoreHistory])
   );
 
   /** 把 ref 里的草稿节流刷到界面。只在内容真变了才 setState */
@@ -163,6 +189,30 @@ export default function ChatScreen() {
     setMsgs((list) => [...list, m]);
     follow.current = true;
   }, []);
+
+  /** 清空对话：服务端和本地一起清，否则下次进来历史又回来了 */
+  const confirmClear = React.useCallback(() => {
+    if (!msgs.length) return;
+    Alert.alert('清空对话记录', '这个操作不能撤销。', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '清空',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await clearChatHistory();
+          } catch {
+            /* 服务端失败也要清本地，否则用户以为按了没反应 */
+          }
+          restored.current = true;
+          draft.current = null;
+          setLive(null);
+          setExpanded({});
+          setMsgs([]);
+        },
+      },
+    ]);
+  }, [msgs.length]);
 
   const send = async (text?: string) => {
     const msg = (text ?? input).trim();
@@ -308,6 +358,11 @@ export default function ChatScreen() {
               <Text style={[s.modelText, { color: t.warn }]}>
                 教练服务暂时不可用，稍后再试
               </Text>
+            ) : null}
+            {msgs.length > 0 ? (
+              <Pressable onPress={confirmClear} style={s.switchRow}>
+                <Text style={s.switchText}>清空对话记录</Text>
+              </Pressable>
             ) : null}
             {thinkingMsgs.length > 0 ? (
               <Pressable

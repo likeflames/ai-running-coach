@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Pressable, Alert } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { api } from '../../src/api';
 import { Screen, Card, Section, Row, Loading, ErrorBox, Empty, Stat, Pill } from '../../src/ui';
@@ -7,7 +7,7 @@ import { Sparkline } from '../../src/charts';
 import { S, T, type Theme } from '../../src/theme';
 import { makeStyles, useTheme } from '../../src/theme-provider';
 import { F } from '../../src/format';
-import { ACTIVITY_TYPE, SOURCE, zh } from '../../src/labels';
+import { ACTIVITY_TYPE, SOURCE, isRunningType, zh } from '../../src/labels';
 
 interface TrackResp {
   available: boolean;
@@ -42,6 +42,8 @@ export default function ActivityDetail() {
   const nav = useNavigation();
   const [detail, setDetail] = React.useState<any>(null);
   const [track, setTrack] = React.useState<TrackResp | null>(null);
+  const [rpe, setRpe] = React.useState<number | null>(null);
+  const [savingRpe, setSavingRpe] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
 
@@ -55,6 +57,7 @@ export default function ActivityDetail() {
       ]);
       setDetail(d);
       setTrack(tr);
+      setRpe(d?.activity?.rpe ?? null);
       setErr(null);
     } catch (e: any) {
       setErr(e?.message || '加载失败');
@@ -74,6 +77,21 @@ export default function ActivityDetail() {
       });
     }
   }, [detail, nav]);
+
+  const saveRpe = async (value: number | null) => {
+    if (!id || savingRpe) return;
+    const prev = rpe;
+    setRpe(value); // 先改 UI，失败再回滚
+    setSavingRpe(true);
+    try {
+      await api.put(`/api/activity/${id}/rpe`, { rpe: value });
+    } catch (e: any) {
+      setRpe(prev);
+      Alert.alert('保存失败', e?.message || '未知错误');
+    } finally {
+      setSavingRpe(false);
+    }
+  };
 
   // 速度：后端是米/秒，这里换成公里/小时
   // 注意：所有 hook 必须写在提前 return 之前，否则首屏加载完会报「Rendered more hooks」
@@ -189,6 +207,43 @@ export default function ActivityDetail() {
           <View style={{ flex: 1, minWidth: 72 }} />
         </View>
       </Card>
+
+      {/* 练后 RPE：力量/交叉训练用于疲劳计算；跑步不显示 */}
+      {!isRunningType(a.type) ? (
+        <Card style={{ marginTop: S.sm }}>
+          <Text style={[s.rpeTitle, { color: t.text }]}>这次训练有多累？</Text>
+          <View style={s.rpeRow}>
+            {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => {
+              const on = rpe === n;
+              return (
+                <Pressable
+                  key={n}
+                  disabled={savingRpe}
+                  onPress={() => saveRpe(on ? null : n)}
+                  style={[
+                    s.rpeBtn,
+                    {
+                      backgroundColor: on ? t.accent : t.cardInner,
+                      borderColor: on ? t.accent : t.borderSoft,
+                      opacity: savingRpe ? 0.6 : 1,
+                    },
+                  ]}
+                >
+                  <Text style={[s.rpeNum, { color: on ? t.accentInk : t.text2 }]}>{n}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={[s.rpeHint, { color: t.text3 }]}>
+            1 很轻松 · 5 有点吃力 · 10 极限。再点一次取消。
+          </Text>
+          <Text style={[s.rpeCalc, { color: t.text2 }]}>
+            {rpe
+              ? `RPE ${rpe} · 折算负荷 ${F.num((rpe * Number(a.duration_min || 0)) / 3, 1)}`
+              : '未评分：力量按心率估算，没有心率的骑行/游泳不计'}
+          </Text>
+        </Card>
+      ) : null}
 
       {/* 速度 */}
       <Section title="速度">
@@ -351,4 +406,17 @@ const useStyles = makeStyles((t: Theme) => ({
   lapRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
   lapIdx: { width: 22, fontSize: T.micro + 1 },
   lapCell: { flex: 1, fontSize: T.caption },
+  rpeTitle: { fontSize: T.caption + 1, fontWeight: '600' },
+  rpeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: S.sm },
+  rpeBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rpeNum: { fontSize: T.caption, fontWeight: '600' },
+  rpeHint: { fontSize: T.micro + 1, marginTop: S.xs },
+  rpeCalc: { fontSize: T.caption, marginTop: S.xs },
 }));

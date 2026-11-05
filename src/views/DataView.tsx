@@ -14,6 +14,8 @@ interface FitnessPoint {
   ctl: number;
   atl: number;
   tsb: number;
+  combined_atl?: number;
+  combined_tsb?: number;
   weekly_km: number;
   has_data?: boolean;
 }
@@ -76,6 +78,10 @@ export default function DataView() {
   if (!report) return null;
 
   const fit: Fitness = report.fitness;
+  // 疲劳/状态用合并口径（跑步 + 折算后的交叉训练），体能仍是跑步 CTL
+  const fitFatigue = fit.combined_atl ?? fit.atl;
+  const fitForm = fit.combined_tsb ?? fit.tsb;
+  const cross = fit.cross_training || null;
   const yearTotal = yearKm
     ? yearKm.total_km ?? Object.values(yearKm.days || {}).reduce((a, b) => a + b, 0)
     : 0;
@@ -178,14 +184,20 @@ export default function DataView() {
       <Section title="体能趋势" desc="近 45 天">
         {!fit.has_data ? (
           <Card>
-            <Empty text="还没有跑步负荷数据，先同步几次跑步再来" />
+            <Empty
+              text={
+                cross && cross.sessions_7d > 0
+                  ? `还没有跑步负荷数据；近 7 天有 ${cross.sessions_7d} 次交叉训练，但只有跑步才计入体能。`
+                  : '还没有跑步负荷数据，先同步几次跑步再来'
+              }
+            />
           </Card>
         ) : (
           <>
             <Card>
               <CardHead
                 title="长期体能 与 近期疲劳"
-                sub={`体能 ${F.num(fit.ctl, 1)} · 疲劳 ${F.num(fit.atl, 1)}`}
+                sub={`体能 ${F.num(fit.ctl, 1)} · 疲劳 ${F.num(fitFatigue, 1)}`}
               />
               <LineChart
                 height={150}
@@ -198,7 +210,9 @@ export default function DataView() {
                     area: true,
                   },
                   {
-                    values: history.map((p) => (p.has_data === false ? null : p.atl)),
+                    values: history.map((p) =>
+                      p.has_data === false ? null : p.combined_atl ?? p.atl
+                    ),
                     color: t.warn,
                     label: '近期疲劳',
                   },
@@ -206,10 +220,17 @@ export default function DataView() {
               />
               <Legend
                 items={[
-                  { color: t.accent, label: '长期体能 · 42 天指数平均' },
-                  { color: t.warn, label: '近期疲劳 · 7 天指数平均' },
+                  { color: t.accent, label: '长期体能 · 42 天指数平均（跑步）' },
+                  { color: t.warn, label: '近期疲劳 · 7 天指数平均（含交叉训练）' },
                 ]}
               />
+              {cross && cross.sessions_7d > 0 ? (
+                <Text style={[s.meta, { marginTop: S.xs }]}>
+                  近 7 天交叉训练 {cross.sessions_7d} 次 · {F.num(cross.minutes_7d, 0)} 分钟，
+                  折算疲劳 {F.num(cross.atl, 1)}
+                  {cross.srpe_sessions_7d > 0 ? ` · ${cross.srpe_sessions_7d} 次按 RPE` : ''}
+                </Text>
+              ) : null}
               {fit.load_model ? (
                 <Text style={[s.meta, { marginTop: S.xs }]}>
                   负荷模型：静息心率 {F.num(fit.load_model.resting_hr, 0)} · 最大心率{' '}
@@ -226,18 +247,18 @@ export default function DataView() {
 
             <Card style={{ marginTop: S.sm }}>
               <CardHead
-                title="状态值（体能 − 疲劳）"
+                title="状态值（跑步体能 − 合并疲劳）"
                 right={
                   <Text
                     style={{
-                      color: tsbColor(t, fit.tsb),
+                      color: tsbColor(t, fitForm),
                       fontSize: T.big,
                       fontWeight: '600',
                       letterSpacing: -0.8,
                     }}
                   >
-                    {fit.tsb > 0 ? '+' : ''}
-                    {F.num(fit.tsb, 1)}
+                    {fitForm > 0 ? '+' : ''}
+                    {F.num(fitForm, 1)}
                   </Text>
                 }
               />
@@ -248,7 +269,9 @@ export default function DataView() {
                 band={{ from: -10, to: 10, color: t.good }}
                 series={[
                   {
-                    values: history.map((p) => (p.has_data === false ? null : p.tsb)),
+                    values: history.map((p) =>
+                      p.has_data === false ? null : p.combined_tsb ?? p.tsb
+                    ),
                     color: t.purple,
                     label: '状态值',
                     area: true,
@@ -257,8 +280,9 @@ export default function DataView() {
               />
               <Fold label="指标定义">
                 <Text style={s.def}>
-                  状态值 = 长期体能 − 近期疲劳。参考带 −10 ~ +10：低于 −10 疲劳偏高，−10 ~ 0
-                  为正常训练疲劳，0 ~ +10 状态较好，+10 以上通常意味着近期减量或休息较多。
+                  状态值 = 跑步体能 − 合并疲劳（跑步 + 按类型折减的交叉训练）。参考带 −10 ~ +10：
+                  低于 −10 疲劳偏高，−10 ~ 0 为正常训练疲劳，0 ~ +10 状态较好，+10
+                  以上通常意味着近期减量或休息较多。
                 </Text>
               </Fold>
             </Card>
