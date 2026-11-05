@@ -458,6 +458,30 @@ export function Hint({
 }
 
 /**
+ * 折叠容器：把次要指标收进「更多」里，默认不占版面。
+ * 和 Hint 的区别是这里放的是任意 React 节点（网格、列表），不是一段文字。
+ */
+export function Fold({
+  label = '更多指标',
+  children,
+}: {
+  label?: string;
+  children: React.ReactNode;
+}) {
+  const s = useStyles();
+  const [open, setOpen] = React.useState(false);
+  return (
+    <View style={s.fold}>
+      {open ? <View style={{ marginBottom: S.sm }}>{children}</View> : null}
+      <Pressable onPress={() => setOpen((v) => !v)} hitSlop={10} style={s.foldHead}>
+        <Text style={s.foldLabel}>{open ? '收起' : label}</Text>
+        <Text style={[s.foldChev, { transform: [{ rotate: open ? '90deg' : '0deg' }] }]}>›</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/**
  * 进度条。
  *
  * 大模型没法给出真实百分比（谁也不知道还要写多久），这里用的是
@@ -662,6 +686,11 @@ const useStyles = makeStyles((t: Theme) => ({
   hintLabel: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
   hintChev: { color: t.accent, fontSize: T.caption + 3, fontWeight: '500', marginTop: -1 },
   hintBody: { color: t.text2, fontSize: T.caption + 1, lineHeight: 21, marginBottom: S.sm },
+
+  fold: { marginTop: S.md },
+  foldHead: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  foldLabel: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
+  foldChev: { color: t.accent, fontSize: T.caption + 3, fontWeight: '500', marginTop: -1 },
 
   btn: {
     paddingVertical: 12,

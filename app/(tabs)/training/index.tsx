@@ -233,9 +233,7 @@ export default function TrainingScreen() {
                   {r.action ? <Text style={s.ruleAction}>怎么办：{r.action}</Text> : null}
                 </View>
               ))}
-            <Text style={s.footNote}>
-              检查的是三件事：一周加量是否超过身体能承受的幅度、有没有连续几周不休、状态很差时有没有硬上强度。
-            </Text>
+            <Text style={s.footNote}>检查项：周加量 · 连续训练周数 · 低状态时的强度课</Text>
           </Card>
         </Section>
       ) : null}

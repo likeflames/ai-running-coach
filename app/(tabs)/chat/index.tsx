@@ -332,9 +332,7 @@ export default function ChatScreen() {
         ListEmptyComponent={
           <View>
             <Text style={s.welcome}>我是你的 AI 跑步教练</Text>
-            <Text style={s.hint}>
-              可以问我训练、恢复、配速、伤病、饮食等问题。我会先查你的真实数据和课表，再给出结论，并把思考过程摊开给你看。
-            </Text>
+            <Text style={s.hint}>训练、恢复、配速、伤病、饮食都可以问。回答会先查你的数据和课表。</Text>
             <View style={{ height: S.md }} />
             {QUICK.map((q) => (
               <Pressable key={q} onPress={() => send(q)} style={s.quick}>

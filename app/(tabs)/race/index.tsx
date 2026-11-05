@@ -203,30 +203,15 @@ export default function RaceScreen() {
                 />
 
                 <Hint label="这张图怎么看">
-                  <Text>
-                    横轴是日期，纵轴是负荷点数。两条线共用同一把尺子，所以能直接比高低。
-                    {'\n\n'}
-                    <Text style={{ color: t.accent }}>绿线是体能</Text>
-                    ，靠日积月累，涨得慢、掉得也慢；
-                    <Text style={{ color: t.warn }}>橙线是疲劳</Text>
-                    ，跑一次就冲高，休息几天就掉下来。
-                    {'\n\n'}
-                    平时训练理想的样子是：绿线缓慢往上爬，橙线在它下方起起伏伏。
-                    橙线窜到绿线上方，说明最近练得比底子扛得住的更多，该收一收了。
-                    {'\n\n'}
-                    比赛日绿色在上、橙色回落，就是身体把训练攒下来的东西兑现出来的时刻。
-                  </Text>
+                  纵轴为负荷点数。体能 42 天、疲劳 7 天指数平均，共用同一刻度。
                 </Hint>
 
                 <Text style={[s.meta, { marginTop: S.md, lineHeight: 20 }]}>{forecast.advice}</Text>
                 {forecast.peak_fatigue?.date ? (
                   <Text style={[s.meta, { marginTop: 5 }]}>
-                    最疲劳出现在 {forecast.peak_fatigue.date}，之后随赛前减量回落
+                    疲劳峰值 {forecast.peak_fatigue.date}
                   </Text>
                 ) : null}
-                <Text style={[s.meta, { marginTop: 5 }]}>
-                  算法：体能按 42 天长周期、疲劳按 7 天短周期做指数平滑，与 TrainingPeaks 一致
-                </Text>
               </Card>
             </Section>
           ) : null}

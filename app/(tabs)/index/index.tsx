@@ -12,17 +12,35 @@ import {
 } from '../../../src/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Markdown } from '../../../src/markdown';
-import { Screen, Card, Section, Stat, Btn, Loading, ErrorBox, Empty, Pill, List, Divider, Progress } from '../../../src/ui';
+import { Screen, Card, Section, Btn, Loading, ErrorBox, Empty, Pill, List, Divider, Progress, Fold } from '../../../src/ui';
+import { Gauge, Donut, SegmentRing, RingLegend, Bullet, LineChart, Legend } from '../../../src/charts';
 import { S, T, TNUM, levelColor, tsbColor, recoveryColor, type Theme } from '../../../src/theme';
 import { makeStyles, useTheme } from '../../../src/theme-provider';
 import { F } from '../../../src/format';
 import { ACTIVITY_TYPE, zh } from '../../../src/labels';
+
+interface FitnessPoint {
+  date: string;
+  ctl: number;
+  atl: number;
+  tsb: number;
+  weekly_km: number;
+}
+
+const HRV_STATUS_ZH: Record<string, string> = {
+  BALANCED: '平衡',
+  UNBALANCED: '不平衡',
+  LOW: '偏低',
+  POOR: '偏低',
+  NORMAL: '正常',
+};
 
 export default function TodayScreen() {
   const t = useTheme();
   const s = useStyles();
   const router = useRouter();
   const [data, setData] = React.useState<StatusResp | null>(null);
+  const [history, setHistory] = React.useState<FitnessPoint[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
@@ -45,9 +63,13 @@ export default function TodayScreen() {
     if (!quiet) setLoading(true);
     const gen = getSessionGeneration();
     try {
-      const d = await api.get<StatusResp>('/api/status');
+      const [d, h] = await Promise.all([
+        api.get<StatusResp>('/api/status'),
+        api.get<{ series: FitnessPoint[] }>('/api/fitness/history?days=14').catch(() => ({ series: [] })),
+      ]);
       if (!isSessionCurrent(gen)) return;
       setData(d);
+      setHistory(h.series || []);
       setErr(null);
     } catch (e: any) {
       if (!isSessionCurrent(gen)) return;
@@ -168,6 +190,58 @@ export default function TodayScreen() {
   const recColor = recoveryColor(t, sleepScore);
   const hasAnyData = !!(rec.date || data.recent_activities?.length);
 
+  /* CTL/ATL 是负荷点数，没有绝对满分。条本身从 0 量到当前峰值，
+   * 浅色带标出近 14 天自己的区间，给数字一个可比的参照。 */
+  const rangeFor = (vals: number[], cur: number) => {
+    const all = [...vals, cur].filter((v) => Number.isFinite(v));
+    const lo = Math.min(...all, 0);
+    const hi = Math.max(...all, 1);
+    const max = Math.ceil(hi * 1.2 + 1);
+    return {
+      min: 0,
+      max,
+      band: { from: Math.max(0, Math.floor(lo)), to: Math.min(max, Math.ceil(hi)) },
+    };
+  };
+  const ctlRange = rangeFor(history.map((p) => p.ctl), Number(fit.ctl) || 0);
+  const atlRange = rangeFor(history.map((p) => p.atl), Number(fit.atl) || 0);
+  const acwr = Number(fit.acwr_ratio) || 0;
+  const acwrColor = acwr > 1.5 ? t.bad : acwr > 1.3 || (acwr > 0 && acwr < 0.8) ? t.warn : t.good;
+  const one = (v: number) => F.num(v, 1);
+  const two = (v: number) => F.num(v, 2);
+
+  const stages = [
+    { label: '深睡', value: Number(rec.deep_minutes) || 0, color: '#5E5CE6' },
+    { label: '浅睡', value: Number(rec.light_minutes) || 0, color: '#64D2FF' },
+    { label: 'REM', value: Number(rec.rem_minutes) || 0, color: '#BF5AF2' },
+    { label: '清醒', value: Number(rec.awake_minutes) || 0, color: t.text3 },
+  ];
+  const hasStages = stages.some((x) => x.value > 0);
+  const stageLegend = (arr: typeof stages) =>
+    arr.map((x) => ({ color: x.color, label: x.label, value: `${Math.round(x.value)} 分` }));
+
+  const has = (v: any) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+  const metrics = [
+    has(rec.hrv) ? { label: '心率变异 HRV', value: `${F.num(rec.hrv, 0)} ms` } : null,
+    has(rec.hrv_status)
+      ? { label: 'HRV 状态', value: HRV_STATUS_ZH[String(rec.hrv_status)] || String(rec.hrv_status) }
+      : null,
+    has(rec.body_battery) ? { label: '身体电量', value: `${F.num(rec.body_battery, 0)}%` } : null,
+    has(rec.resting_hr) ? { label: '静息心率', value: `${F.num(rec.resting_hr, 0)} bpm` } : null,
+    has(rec.night_hr) ? { label: '夜间心率', value: `${F.num(rec.night_hr, 0)} bpm` } : null,
+    has(rec.readiness_score) ? { label: '训练准备度', value: F.num(rec.readiness_score, 0) } : null,
+    has(rec.recovery_time_min) ? { label: '恢复时间', value: F.duration(rec.recovery_time_min) } : null,
+    has(rec.acute_load) ? { label: '急性负荷', value: F.num(rec.acute_load, 0) } : null,
+    has(rec.vo2max) ? { label: '最大摄氧量', value: F.num(rec.vo2max, 1) } : null,
+    has(rec.stress_avg) ? { label: '日间压力', value: F.num(rec.stress_avg, 0) } : null,
+    has(rec.sleep_stress_avg) ? { label: '睡眠压力', value: F.num(rec.sleep_stress_avg, 0) } : null,
+    has(rec.sleep_efficiency) ? { label: '睡眠效率', value: `${F.num(rec.sleep_efficiency, 0)}%` } : null,
+    has(rec.spo2_avg) ? { label: '夜间血氧', value: `${F.num(rec.spo2_avg, 0)}%` } : null,
+    has(rec.awake_count) ? { label: '清醒次数', value: `${F.num(rec.awake_count, 0)} 次` } : null,
+    has(rec.sleep_latency_min) ? { label: '入睡耗时', value: `${F.num(rec.sleep_latency_min, 0)} 分` } : null,
+    has(rec.temp_deviation) ? { label: '体温偏移', value: `${F.num(rec.temp_deviation, 1)} °C` } : null,
+  ].filter(Boolean) as { label: string; value: string }[];
+
   return (
     <Screen refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }}>
       <View style={s.topRow}>
@@ -181,7 +255,7 @@ export default function TodayScreen() {
         <Card>
           <Text style={[s.emptyTitle, { color: t.text }]}>先把数据接上</Text>
           <Text style={[s.emptyBody, { color: t.text2 }]}>
-            完善个人资料，再接上佳明、苹果健康或 Oura，之后这里会显示每天的恢复状态和训练建议。
+            完善个人资料并连接数据源，这里会显示每天的恢复状态和训练建议。
           </Text>
           <View style={{ height: S.md }} />
           <Btn title="完善个人资料" onPress={() => router.push('/profile')} primary />
@@ -190,84 +264,138 @@ export default function TodayScreen() {
         </Card>
       ) : null}
 
-      {/* ---------- 恢复 ---------- */}
+      {/* ---------- 体能状态：首屏主卡 ---------- */}
+      {hasAnyData ? (
+        <Card>
+          <View style={s.cardTop}>
+            <Text style={[s.eyebrow, { color: t.text2 }]}>体能状态</Text>
+            <Text style={[s.cardDate, { color: t.text3 }]}>近 14 天</Text>
+          </View>
+
+          <Gauge
+            value={Number(fit.tsb) || 0}
+            min={-30}
+            max={30}
+            height={162}
+            color={tsbColor(t, fit.tsb || 0)}
+            caption="TSB · 体能 − 疲劳"
+            format={(v) => `${v > 0 ? '+' : ''}${F.num(v, 1)}`}
+            zones={[
+              { from: -30, to: -10, color: t.bad },
+              { from: -10, to: 0, color: t.warn },
+              { from: 0, to: 10, color: t.good },
+              { from: 10, to: 30, color: t.accent },
+            ]}
+          />
+
+          <Bullet
+            label="体能储备 · CTL"
+            value={Number(fit.ctl) || 0}
+            min={ctlRange.min}
+            max={ctlRange.max}
+            band={ctlRange.band}
+            color={t.accent}
+            format={one}
+          />
+          <Bullet
+            label="近期疲劳 · ATL"
+            value={Number(fit.atl) || 0}
+            min={atlRange.min}
+            max={atlRange.max}
+            band={atlRange.band}
+            color={t.warn}
+            format={one}
+          />
+          <Bullet
+            label="负荷比 · ACWR"
+            value={acwr}
+            min={0}
+            max={2}
+            band={{ from: 0.8, to: 1.3 }}
+            color={acwrColor}
+            format={two}
+          />
+
+          {history.length > 1 ? (
+            <View style={{ marginTop: S.md }}>
+              <Divider />
+              <Text style={[s.chartTitle, { color: t.text2 }]}>体能 / 疲劳</Text>
+              <LineChart
+                height={112}
+                yTicks={2}
+                labels={history.map((p) => F.dayShort(p.date))}
+                series={[
+                  { values: history.map((p) => p.ctl), color: t.accent, label: '体能', area: true },
+                  { values: history.map((p) => p.atl), color: t.warn, label: '疲劳' },
+                ]}
+              />
+              <Legend
+                items={[
+                  { color: t.accent, label: '体能 · CTL' },
+                  { color: t.warn, label: '疲劳 · ATL' },
+                ]}
+              />
+            </View>
+          ) : null}
+
+          <Text style={[s.foot, { color: t.text3 }]}>
+            本周跑量 {F.num(fit.weekly_km, 1)} 公里 · CTL 42 天 / ATL 7 天指数平均
+          </Text>
+        </Card>
+      ) : null}
+
+      {/* ---------- 恢复：评分环 + 睡眠分期扇形环 ---------- */}
       <Card>
         <View style={s.cardTop}>
-          <Text style={[s.eyebrow, { color: t.text2 }]}>睡眠评分</Text>
+          <Text style={[s.eyebrow, { color: t.text2 }]}>恢复</Text>
           <Text style={[s.cardDate, { color: t.text3 }]}>{rec.date || F.today()}</Text>
         </View>
 
-        <View style={s.heroRow}>
-          <Text style={[s.heroNum, { color: recColor }]}>
-            {rec.sleep_score ? F.num(rec.sleep_score) : '–'}
-          </Text>
-          <Text style={[s.heroNote, { color: recColor }]}>
-            {sleepScore >= 80 ? '恢复不错' : sleepScore >= 60 ? '还算够用' : sleepScore > 0 ? '偏低了' : '暂无数据'}
-          </Text>
-        </View>
-
-        <View style={[s.track, { backgroundColor: t.cardInner }]}>
-          <View
-            style={{
-              width: `${Math.max(2, Math.min(100, sleepScore))}%`,
-              height: '100%',
-              borderRadius: 5,
-              backgroundColor: recColor,
-            }}
-          />
-        </View>
-
-        <View style={{ marginTop: S.md }}>
-          <Divider />
-          <View style={[s.statRow, { marginTop: S.md - 2 }]}>
-            <Stat label="心率变异性" value={F.num(rec.hrv)} unit="ms" />
-            <Stat
-              label="身体电量"
-              value={rec.body_battery ? `${Math.round(rec.body_battery)}%` : '-'}
-              color={
-                Number(rec.body_battery) > 70 ? t.good : Number(rec.body_battery) > 40 ? t.warn : t.bad
-              }
+        {hasStages ? (
+          <View style={s.ringRow}>
+            <Donut
+              value={sleepScore}
+              max={100}
+              size={112}
+              color={sleepScore ? recColor : t.text3}
+              caption="睡眠评分"
+              format={() => (sleepScore ? String(Math.round(sleepScore)) : '–')}
             />
-            <Stat label="静息心率" value={F.num(rec.resting_hr)} unit="bpm" />
+            <SegmentRing
+              size={112}
+              center={F.duration(rec.sleep_minutes)}
+              caption="睡眠时长"
+              segments={stages.map((x) => ({ value: x.value, color: x.color, label: x.label }))}
+            />
           </View>
-          <View style={[s.statRow, { marginTop: S.md }]}>
-            <Stat label="压力均值" value={F.num(rec.stress_avg)} />
-            <Stat label="睡眠时长" value={rec.sleep_minutes ? F.duration(rec.sleep_minutes) : '-'} />
-            <View style={{ flex: 1, minWidth: 70 }} />
+        ) : (
+          <View style={s.heroRow}>
+            <Text style={[s.heroNum, { color: sleepScore ? recColor : t.text3 }]}>
+              {sleepScore ? F.num(sleepScore) : '–'}
+            </Text>
+            <Text style={[s.heroNote, { color: t.text2 }]}>睡眠评分</Text>
           </View>
+        )}
 
-          {/* 睡眠分期：只看总时长会被「躺够 8 小时但深睡只有 40 分钟」骗过去 */}
-          {rec.deep_minutes || rec.rem_minutes ? (
-            <View style={{ marginTop: S.md }}>
-              <View style={s.sleepBar}>
-                {(() => {
-                  const parts = [
-                    { v: rec.deep_minutes || 0, c: '#5E5CE6' },
-                    { v: rec.light_minutes || 0, c: '#64D2FF' },
-                    { v: rec.rem_minutes || 0, c: '#BF5AF2' },
-                    { v: rec.awake_minutes || 0, c: t.text3 },
-                  ];
-                  const total = parts.reduce((a, b) => a + b.v, 0) || 1;
-                  return parts.map((p, i) =>
-                    p.v > 0 ? <View key={i} style={{ flex: p.v / total, backgroundColor: p.c }} /> : null
-                  );
-                })()}
-              </View>
-              <View style={[s.statRow, { marginTop: S.sm }]}>
-                <Stat label="深睡" value={rec.deep_minutes ?? null} unit="分" />
-                <Stat label="浅睡" value={rec.light_minutes ?? null} unit="分" />
-                <Stat label="REM" value={rec.rem_minutes ?? null} unit="分" />
-                <Stat label="清醒" value={rec.awake_minutes ?? null} unit="分" />
-              </View>
-              {rec.sleep_efficiency ? (
-                <Text style={[s.foot, { color: t.text3 }]}>
-                  睡眠效率 {F.num(rec.sleep_efficiency, 0)}%
-                  {rec.sleep_latency_min ? ` · 入睡耗时 ${rec.sleep_latency_min} 分` : ''}
-                </Text>
-              ) : null}
+        {hasStages ? (
+          <View style={s.legendRow}>
+            <RingLegend items={stageLegend(stages.slice(0, 2))} />
+            <RingLegend items={stageLegend(stages.slice(2, 4))} />
+          </View>
+        ) : null}
+
+        {metrics.length ? (
+          <Fold label={`更多指标（${metrics.length}）`}>
+            <View style={s.metricGrid}>
+              {metrics.map((m) => (
+                <View key={m.label} style={s.metricCell}>
+                  <Text style={s.metricLabel}>{m.label}</Text>
+                  <Text style={s.metricValue}>{m.value}</Text>
+                </View>
+              ))}
             </View>
-          ) : null}
-        </View>
+          </Fold>
+        ) : null}
       </Card>
 
       {/* ---------- 今日建议（规则版） ---------- */}
@@ -281,30 +409,6 @@ export default function TodayScreen() {
           </View>
           <Text style={[s.adviceText, { color: levelColor(t, adv.level) }]}>{adv.advice}</Text>
           {adv.reason ? <Text style={[s.adviceReason, { color: t.text2 }]}>{adv.reason}</Text> : null}
-        </Card>
-      ) : null}
-
-      {/* ---------- 体能状态 ---------- */}
-      {hasAnyData ? (
-        <Card>
-          <View style={s.cardTop}>
-            <Text style={[s.eyebrow, { color: t.text2 }]}>体能状态</Text>
-            <Pill text={fit.status || '-'} color={tsbColor(t, fit.tsb || 0)} />
-          </View>
-          <View style={[s.statRow, { marginTop: S.sm }]}>
-            <Stat label="体能储备" value={F.num(fit.ctl, 1)} />
-            <Stat label="近期疲劳" value={F.num(fit.atl, 1)} />
-            <Stat label="当前状态" value={F.num(fit.tsb, 1)} color={tsbColor(t, fit.tsb || 0)} />
-          </View>
-          <View style={[s.statRow, { marginTop: S.md }]}>
-            <Stat label="本周跑量" value={F.num(fit.weekly_km, 1)} unit="公里" />
-            <Stat
-              label="负荷比"
-              value={F.num(fit.acwr_ratio, 2)}
-              color={fit.acwr_ratio > 1.5 ? t.bad : fit.acwr_ratio > 1.3 ? t.warn : t.good}
-            />
-            <View style={{ flex: 1, minWidth: 70 }} />
-          </View>
         </Card>
       ) : null}
 
@@ -429,7 +533,13 @@ const useStyles = makeStyles((t: Theme) => ({
   track: { height: 8, borderRadius: 5, overflow: 'hidden', marginTop: S.xs },
 
   statRow: { flexDirection: 'row', gap: S.sm },
-  sleepBar: { flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden' },
+  ringRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', marginTop: S.sm },
+  legendRow: { flexDirection: 'row', gap: S.lg, marginTop: S.md },
+  chartTitle: { fontSize: T.caption, marginTop: S.md, marginBottom: S.xs },
+  metricGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  metricCell: { width: '50%', paddingVertical: 7, paddingRight: S.md },
+  metricLabel: { color: t.text3, fontSize: T.micro },
+  metricValue: { color: t.text, fontSize: T.body2, fontWeight: '500', marginTop: 2, ...TNUM },
 
   adviceText: { fontSize: 22, fontWeight: '600', letterSpacing: -0.5, lineHeight: 30 },
   adviceReason: { fontSize: T.body2, lineHeight: 21, marginTop: S.sm - 2 },

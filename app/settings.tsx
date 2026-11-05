@@ -229,8 +229,7 @@ export default function SettingsScreen() {
       <Section title="关于">
         <Card>
           <Text style={[s.about, { color: t.text2 }]}>
-            训练、恢复和对话数据只属于你的账号，其他用户看不到。数据用于生成训练建议，
-            其中必要的摘要会发送给模型服务处理；本应用不提供医疗诊断，身体不适请就医。
+            数据按账号隔离。生成建议时必要的摘要会发送给模型服务；本应用不提供医疗诊断。
           </Text>
           <View style={{ height: S.md }} />
           <Divider />

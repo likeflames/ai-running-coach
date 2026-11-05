@@ -54,9 +54,7 @@ export default function CoachServiceScreen() {
 
   return (
     <Screen noTabBar>
-      <Text style={s.lead}>
-        教练对话由服务端统一接入的模型驱动。你不需要填任何 Key，也不用为对话单独付费。
-      </Text>
+      <Text style={s.lead}>教练对话由服务端统一接入，无需填写 Key。</Text>
 
       <Section title="当前状态">
         <Card>
@@ -74,26 +72,16 @@ export default function CoachServiceScreen() {
 
       <Section title="每天有额度">
         <Card>
-          <Text style={s.body}>
-            为了防止一个人把额度跑满、所有人跟着卡住，每个账号每天有对话次数和字数的上限。
-            额度按自然日（北京时间）重置，第二天自动恢复。
-          </Text>
-          <Text style={s.body}>
-            如果聊到一半提示「今天的教练额度用完了」，不是出故障，等明天就好。
-            想省额度的话，让它一次把问题说清楚，比来回追问更划算。
-          </Text>
+          <Text style={s.body}>每个账号每天有对话次数与字数上限，按北京时间自然日重置。</Text>
         </Card>
       </Section>
 
-      <Hint label="为什么不让每个人自己填 Key？">
-        自己填 Key 意味着每个人的对话要自己去模型厂商开户、充值、维护。
-        对只想跑步的人来说这是纯粹的负担，而且一旦 Key 失效，App 会以最难懂的方式坏掉。
-        现在由服务端统一接入，你只需要跑步和提问。
+      <Hint label="为什么不用自己的 Key？">
+        自填 Key 需要自行开户、充值和维护；服务端统一接入可省去这些步骤。
       </Hint>
 
       <Hint label="对话内容会被拿去训练吗？">
-        不会。请求只发给你正在用的模型服务，用来生成这一条回答；
-        服务端只在数据库里记「谁在哪天用了多少次、多少字」，不保存对话正文之外的用途。
+        不会。请求只用于生成当前回答，服务端只记录调用次数和字数。
       </Hint>
     </Screen>
   );

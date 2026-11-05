@@ -114,15 +114,12 @@ export default function HealthScreen() {
           />
           <Legend
             items={[
-              { color: t.accent, label: '体能 — 长期积累的能力' },
-              { color: t.warn, label: '疲劳 — 最近几天的训练压力' },
+              { color: t.accent, label: '体能 · 42 天指数平均' },
+              { color: t.warn, label: '疲劳 · 7 天指数平均' },
             ]}
           />
           <Hint label="这两条线怎么看">
-            横轴是日期，纵轴是负荷点数，两条线越高代表负担越重。看两条线的相对位置：
-            <Text style={{ color: t.accent }}>蓝线在橙线上方</Text>
-            ，说明底子在、恢复得过来；<Text style={{ color: t.warn }}>橙线窜到蓝线上方</Text>
-            ，就是最近练猛了，容易累出伤。理想状态是蓝线缓慢爬升、橙线在它下面起伏。
+            纵轴为负荷点数，横轴为日期。两条线共用同一刻度。
           </Hint>
         </Card>
 
@@ -144,10 +141,7 @@ export default function HealthScreen() {
             series={[{ values: history.map((p) => p.tsb), color: t.purple, label: '状态', area: true }]}
           />
           <Hint label="这条线怎么读">
-            这条线就是「体能减去疲劳」，可以直接理解成<Text style={{ color: t.text }}>今天身体还剩多少余量</Text>。
-            绿色带（−10 ~ +10）是正常训练区间；<Text style={{ color: t.bad }}>掉到 −20 以下</Text>
-            说明欠了太多恢复，该减量或休息；<Text style={{ color: t.warn }}>长期高于 +15</Text>
-            说明最近太闲，体能会往下掉。比赛日最好安排在 +5 ~ +15 这一段。
+            状态 = 体能 − 疲劳。绿色带为 −10 ~ +10，0 线以上为正值。
           </Hint>
         </Card>
       </Section>
@@ -185,7 +179,7 @@ export default function HealthScreen() {
         ) : (
           <Card>
             <Pressable onPress={() => setShowActivities(true)} style={s.collapsedRow}>
-              <Text style={s.collapsedText}>每一次跑步、球类、骑行都在这里，点开看速度、心率、海拔</Text>
+              <Text style={s.collapsedText}>查看全部活动记录</Text>
               <Text style={s.toggle}>展开 ›</Text>
             </Pressable>
           </Card>

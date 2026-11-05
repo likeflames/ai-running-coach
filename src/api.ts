@@ -648,10 +648,17 @@ export interface Recovery {
   body_battery: number | null;
   resting_hr: number | null;
   stress_avg: number | null;
-  /** Oura 独有：准备度 / 体温偏移 / 夜间平均心率 */
+  /** 准备度（佳明/Oura）、体温偏移（Oura）、夜间平均心率（佳明/Oura） */
   readiness_score?: number | null;
   temp_deviation?: number | null;
   night_hr?: number | null;
+  /** 最大摄氧量、训练准备度分量、睡眠生理量（佳明） */
+  vo2max?: number | null;
+  recovery_time_min?: number | null;
+  acute_load?: number | null;
+  spo2_avg?: number | null;
+  sleep_stress_avg?: number | null;
+  awake_count?: number | null;
   /** 睡眠分期（分钟），Oura 和佳明都给 */
   deep_minutes?: number | null;
   light_minutes?: number | null;

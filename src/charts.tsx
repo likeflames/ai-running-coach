@@ -2,8 +2,25 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import Svg, { Path, Line, Circle, Rect, Text as SvgText, Polyline } from 'react-native-svg';
-import { T, alpha, type Theme } from './theme';
+import { S, T, TNUM, alpha, type Theme } from './theme';
 import { makeStyles, useTheme } from './theme-provider';
+
+/* ---------- 圆弧工具 ----------
+ * 角度用标准极坐标：0° 在右、90° 在下、180° 在左、270° 在上。
+ * 沿角度增大的方向画弧（SVG sweep-flag=1），所以 180→360 正好是上半圆。
+ */
+function polar(cx: number, cy: number, r: number, deg: number) {
+  const rad = (deg * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function arcPath(cx: number, cy: number, r: number, fromDeg: number, toDeg: number) {
+  const span = Math.min(Math.max(toDeg - fromDeg, 0), 359.9);
+  const a = polar(cx, cy, r, fromDeg);
+  const b = polar(cx, cy, r, fromDeg + span);
+  const large = span > 180 ? 1 : 0;
+  return `M${a.x.toFixed(2)},${a.y.toFixed(2)} A${r},${r} 0 ${large} 1 ${b.x.toFixed(2)},${b.y.toFixed(2)}`;
+}
 
 function buildPath(points: number[], w: number, h: number, min: number, max: number) {
   if (!points.length) return '';
@@ -420,6 +437,300 @@ export function TrackShape({
           />
         </Svg>
       ) : null}
+    </View>
+  );
+}
+
+/* ---------- 半圆仪表：给「状态（TSB）」这类有正负区间的数值一个刻度 ---------- */
+
+export function Gauge({
+  value,
+  min = -30,
+  max = 30,
+  height = 158,
+  color,
+  zones,
+  caption,
+  format,
+}: {
+  value: number;
+  min?: number;
+  max?: number;
+  height?: number;
+  color?: string;
+  zones?: { from: number; to: number; color: string }[];
+  /** 数值下方的说明，只写定义和单位，不写结论 */
+  caption?: string;
+  format?: (v: number) => string;
+}) {
+  const t = useTheme();
+  const [w, setW] = React.useState(0);
+  const stroke = color || t.accent;
+  const span = max - min || 1;
+  const pct = (v: number) => Math.max(0, Math.min(1, (v - min) / span));
+  const deg = (v: number) => 180 + pct(v) * 180;
+
+  const cx = w / 2;
+  const cy = height - 16;
+  const r = Math.max(20, Math.min(w / 2 - 18, height - 30));
+  const thickness = 11;
+  const end = polar(cx, cy, r, deg(value));
+  const shown = format ? format(value) : String(value);
+
+  return (
+    <View onLayout={(e) => setW(e.nativeEvent.layout.width)} style={{ height }}>
+      {w > 0 ? (
+        <Svg width={w} height={height}>
+          {/* 底轨 */}
+          <Path
+            d={arcPath(cx, cy, r, 180, 360)}
+            stroke={t.cardInner}
+            strokeWidth={thickness}
+            fill="none"
+            strokeLinecap="round"
+          />
+          {/* 区间底色：只标刻度带，不写判断 */}
+          {(zones || []).map((z, i) => (
+            <Path
+              key={i}
+              d={arcPath(cx, cy, r, deg(z.from), deg(z.to))}
+              stroke={alpha(z.color, t.dark ? 0.3 : 0.22)}
+              strokeWidth={thickness}
+              fill="none"
+            />
+          ))}
+          {/* 当前值 */}
+          {pct(value) > 0.004 ? (
+            <Path
+              d={arcPath(cx, cy, r, 180, deg(value))}
+              stroke={stroke}
+              strokeWidth={thickness}
+              fill="none"
+              strokeLinecap="round"
+            />
+          ) : null}
+          <Circle cx={end.x} cy={end.y} r={6} fill={stroke} stroke={t.card} strokeWidth={2.5} />
+
+          <SvgText
+            x={cx}
+            y={cy - r * 0.42}
+            fontSize={36}
+            fontWeight="600"
+            fill={stroke}
+            textAnchor="middle"
+          >
+            {shown}
+          </SvgText>
+          {caption ? (
+            <SvgText x={cx} y={cy - r * 0.42 + 19} fontSize={11} fill={t.text3} textAnchor="middle">
+              {caption}
+            </SvgText>
+          ) : null}
+          <SvgText x={cx - r} y={cy + 13} fontSize={11} fill={t.text3} textAnchor="start">
+            {format ? format(min) : min}
+          </SvgText>
+          <SvgText x={cx + r} y={cy + 13} fontSize={11} fill={t.text3} textAnchor="end">
+            {format ? format(max) : max}
+          </SvgText>
+        </Svg>
+      ) : null}
+    </View>
+  );
+}
+
+/* ---------- 环形进度：0–100 这类有明确满分的指标 ---------- */
+
+export function Donut({
+  value,
+  max = 100,
+  size = 108,
+  thickness = 10,
+  color,
+  caption,
+  format,
+}: {
+  value: number;
+  max?: number;
+  size?: number;
+  thickness?: number;
+  color?: string;
+  caption?: string;
+  format?: (v: number) => string;
+}) {
+  const t = useTheme();
+  const stroke = color || t.accent;
+  const c = size / 2;
+  const r = (size - thickness) / 2 - 2;
+  const frac = Math.max(0, Math.min(1, (max ? value / max : 0)));
+  const shown = format ? format(value) : String(Math.round(value));
+
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={size} height={size} style={{ position: 'absolute' }}>
+        <Circle cx={c} cy={c} r={r} stroke={t.cardInner} strokeWidth={thickness} fill="none" />
+        {frac > 0.002 ? (
+          <Path
+            d={arcPath(c, c, r, -90, -90 + frac * 360)}
+            stroke={stroke}
+            strokeWidth={thickness}
+            fill="none"
+            strokeLinecap="round"
+          />
+        ) : null}
+      </Svg>
+      <Text style={{ color: stroke, fontSize: 30, fontWeight: '600', letterSpacing: -1, ...TNUM }}>
+        {shown}
+      </Text>
+      {caption ? (
+        <Text style={{ color: t.text3, fontSize: T.micro, marginTop: 1 }}>{caption}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+/* ---------- 分段环：把一个总量按构成拆开（睡眠分期等） ---------- */
+
+export interface RingSegment {
+  value: number;
+  color: string;
+  label?: string;
+}
+
+export function SegmentRing({
+  segments,
+  size = 108,
+  thickness = 10,
+  center,
+  caption,
+}: {
+  segments: RingSegment[];
+  size?: number;
+  thickness?: number;
+  center?: string;
+  caption?: string;
+}) {
+  const t = useTheme();
+  const c = size / 2;
+  const r = (size - thickness) / 2 - 2;
+  const total = segments.reduce((a, b) => a + Math.max(0, b.value), 0);
+  const gapDeg = total > 0 ? 1.6 : 0;
+  let cursor = -90;
+
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={size} height={size} style={{ position: 'absolute' }}>
+        <Circle cx={c} cy={c} r={r} stroke={t.cardInner} strokeWidth={thickness} fill="none" />
+        {total > 0
+          ? segments.map((seg, i) => {
+              const v = Math.max(0, seg.value);
+              if (!v) return null;
+              const sweep = (v / total) * 360;
+              const from = cursor + gapDeg / 2;
+              const to = cursor + sweep - gapDeg / 2;
+              cursor += sweep;
+              if (to <= from) return null;
+              return (
+                <Path
+                  key={i}
+                  d={arcPath(c, c, r, from, to)}
+                  stroke={seg.color}
+                  strokeWidth={thickness}
+                  fill="none"
+                />
+              );
+            })
+          : null}
+      </Svg>
+      {center ? (
+        <Text style={{ color: t.text, fontSize: 20, fontWeight: '600', letterSpacing: -0.5, ...TNUM }}>
+          {center}
+        </Text>
+      ) : null}
+      {caption ? (
+        <Text style={{ color: t.text3, fontSize: T.micro, marginTop: 1 }}>{caption}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** 分段环的图例：色点 + 名称 + 数值 */
+export function RingLegend({ items }: { items: { color: string; label: string; value: string }[] }) {
+  const t = useTheme();
+  return (
+    <View style={{ flex: 1, gap: 7 }}>
+      {items.map((it) => (
+        <View key={it.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: it.color }} />
+          <Text style={{ color: t.text2, fontSize: T.caption, flex: 1 }}>{it.label}</Text>
+          <Text style={{ color: t.text, fontSize: T.caption, ...TNUM }}>{it.value}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/* ---------- 区间参照条：让一个数字带上「在什么范围里」的尺子 ---------- */
+
+export function Bullet({
+  label,
+  value,
+  min,
+  max,
+  color,
+  band,
+  format,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  color?: string;
+  /** 浅色参考区间，例如 ACWR 的 0.8–1.3 */
+  band?: { from: number; to: number };
+  format?: (v: number) => string;
+}) {
+  const t = useTheme();
+  const c = color || t.accent;
+  const span = max - min || 1;
+  const pct = (v: number) => Math.max(0, Math.min(100, ((v - min) / span) * 100));
+  const f = format || ((v: number) => String(v));
+
+  return (
+    <View style={{ marginTop: S.sm + 2 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <Text style={{ color: t.text2, fontSize: T.caption }}>{label}</Text>
+        <Text style={{ color: t.text, fontSize: T.body2, fontWeight: '600', ...TNUM }}>{f(value)}</Text>
+      </View>
+      <View
+        style={{
+          height: 9,
+          marginTop: 6,
+          borderRadius: 5,
+          backgroundColor: t.cardInner,
+          overflow: 'hidden',
+        }}
+      >
+        {band ? (
+          <View
+            style={{
+              position: 'absolute',
+              left: `${pct(band.from)}%`,
+              width: `${Math.max(0, pct(band.to) - pct(band.from))}%`,
+              top: 0,
+              bottom: 0,
+              backgroundColor: alpha(t.good, t.dark ? 0.3 : 0.2),
+            }}
+          />
+        ) : null}
+        <View style={{ width: `${pct(value)}%`, height: '100%', borderRadius: 5, backgroundColor: c }} />
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+        <Text style={{ color: t.text3, fontSize: T.micro, ...TNUM }}>{f(min)}</Text>
+        {band ? (
+          <Text style={{ color: t.text3, fontSize: T.micro }}>{`参考 ${f(band.from)}–${f(band.to)}`}</Text>
+        ) : null}
+        <Text style={{ color: t.text3, fontSize: T.micro, ...TNUM }}>{f(max)}</Text>
+      </View>
     </View>
   );
 }

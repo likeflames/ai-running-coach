@@ -311,9 +311,7 @@ export default function SourcesScreen() {
 
   return (
     <Screen noTabBar>
-      <Text style={[s.hint, { color: t.text3 }]}>
-        数据源负责把「身体恢复」和「跑了什么」喂给教练。可以同时连多个，互补合并。
-      </Text>
+      <Text style={[s.hint, { color: t.text3 }]}>可同时连接多个数据源，指标按来源合并。</Text>
 
       {items.map((src) => {
         const personal = src.auth === 'account';

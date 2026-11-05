@@ -143,7 +143,7 @@ export default function ProfileScreen() {
               onChange={(v) => setF({ ...f, five_k_pb_min: v })}
               placeholder="23:30"
               keyboard="numbers-and-punctuation"
-              hint="按 分:秒 填。没有比赛成绩，就填最近一次全力跑 5 公里的时间。"
+              hint="格式 分:秒；留空可从已同步活动自动识别。"
             />
             <Field
               label="每周能练几天"
@@ -175,7 +175,7 @@ export default function ProfileScreen() {
               onChange={(v) => setF({ ...f, race_distance_km: v })}
               placeholder="21.1 / 42.195 / 10"
               keyboard="decimal-pad"
-              hint="决定课表按 5K / 10K / 半马 / 全马哪个专项排质量课和长距离。留空则从目标文字或历史最长跑量推断。"
+              hint="决定课表专项；留空时从目标文字或历史最长跑推断。"
             />
           </Card>
         </Section>
@@ -213,8 +213,7 @@ export default function ProfileScreen() {
             }}
           />
           <Text style={{ color: t.text3, fontSize: 11, marginTop: 6, lineHeight: 16 }}>
-            从已同步的活动里找最快的 5 公里；没有正好 5 公里时，用 3–21 km 的记录折算。
-            手填的成绩不会被日常同步覆盖。
+            取已同步活动里最快的 5 公里；无 5 公里记录时用 3–21 km 折算。手填成绩不会被覆盖。
           </Text>
         </View>
       </ScrollView>

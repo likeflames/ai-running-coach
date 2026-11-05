@@ -121,10 +121,7 @@ export default function HealthSetupScreen() {
 
   return (
     <Screen noTabBar>
-      <Text style={s.lead}>
-        苹果健康的数据锁在手机里，服务器读不到。所以反过来：让手机把数据推上来。
-        两种方式可以都用，不冲突。
-      </Text>
+      <Text style={s.lead}>苹果健康数据由手机推送到服务器，两种方式可同时用。</Text>
 
       <Section title="方式一 · 每天自动" desc="配一次，之后每天定时自己跑。推荐先做这个。">
         <Card>
@@ -154,9 +151,7 @@ export default function HealthSetupScreen() {
             </Text>
           </Pressable>
 
-          <Text style={s.warn}>
-            这把密钥只能往你的账号里写数据，读不到任何东西。别发到群里就行。
-          </Text>
+          <Text style={s.warn}>密钥仅有写入权限，无法读取数据。</Text>
         </Card>
 
         <Card style={{ marginTop: S.md }}>
@@ -177,10 +172,7 @@ export default function HealthSetupScreen() {
 
         <Card style={{ marginTop: S.md }}>
           <Text style={s.stepTitle}>字段名照着抄，只填你想要的</Text>
-          <Text style={s.stepDesc}>
-            每个字段的值用「查找健康样本」的动作取出来放进去。少写几个没关系，
-            写错了名字那一项会被忽略，不会整条失败。
-          </Text>
+          <Text style={s.stepDesc}>字段值用「查找健康样本」动作取得；名称写错会被忽略。</Text>
           {info!.fields.map((f) => (
             <View key={f.key} style={[s.fieldRow, { borderTopColor: t.border }]}>
               <Text style={[s.fieldKey, { color: t.text }]}>{f.key}</Text>
@@ -192,7 +184,7 @@ export default function HealthSetupScreen() {
 
       <Section
         title="方式二 · 一次性补齐历史"
-        desc="想让它知道你过去几个月怎么练的，用这个。以后每隔一两个月导一次就行。"
+        desc="补齐历史数据，之后每隔一两个月导一次。"
       >
         <Card>
           <Text style={s.stepTitle}>手机上导出</Text>
@@ -227,10 +219,7 @@ export default function HealthSetupScreen() {
 
       <Section title="数据怎么合并">
         <Card>
-          <Text style={s.body}>
-            同时接了佳明和苹果健康时，同一个指标（静息心率、HRV、睡眠）以佳明为准，
-            苹果只补佳明没有的部分。跑步记录按时间对齐，同一次跑不会被算两遍。
-          </Text>
+          <Text style={s.body}>同一指标以佳明为准，苹果健康补齐缺项；跑步记录按时间去重。</Text>
           <View style={[s.actions, { marginTop: S.md }]}>
             <Btn title="换一把密钥" onPress={rotate} disabled={busy} small />
           </View>
@@ -238,9 +227,7 @@ export default function HealthSetupScreen() {
       </Section>
 
       <Hint label="为什么不做成自动授权？">
-        苹果的健康数据只允许「装在手机上的 App」读取，而且这个权限要用付费的
-        开发者账号申请。走快捷指令就绕开了这一层：不用花钱，也不用等审核，
-        代价是要自己配一次。
+        读取健康数据需要付费开发者账号的权限；快捷指令不需要，但需手动配置一次。
       </Hint>
     </Screen>
   );
