@@ -95,9 +95,11 @@ export default function SourcesScreen() {
       const r = await api.post<any>(`/api/sources/${src.id}/sync?days=${days}`, {}, timeout);
       const rec = r?.recovery?.recovery_days ?? 0;
       const act = r?.activity?.activities;
+      const pb = r?.pb_5k;
       const parts: string[] = [];
       if (act != null) parts.push(`新增 ${act} 条训练`);
       if (rec) parts.push(`更新 ${rec} 天恢复数据`);
+      if (pb?.updated) parts.push(`识别到 5 公里成绩 ${pb.text}`);
       Alert.alert('同步完成', `${src.name}：${parts.length ? parts.join('，') : '没有新数据'}。`);
       await load(true);
     } catch (e: any) {

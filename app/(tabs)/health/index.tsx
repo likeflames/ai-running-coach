@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { api, WeeklyReport, Fitness } from '../../../src/api';
 import { Screen, Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat, Hint } from '../../../src/ui';
 import { Bars, Heatmap, LineChart, Legend } from '../../../src/charts';
@@ -48,9 +49,14 @@ export default function HealthScreen() {
     }
   }, []);
 
-  React.useEffect(() => {
-    load();
-  }, [load]);
+  // 每次切回这个标签都重新拉一次。
+  // 用 useEffect 只在挂载时加载一次，而标签页是常驻的——
+  // 同步完数据回来，看到的还是进来时那份旧数据。
+  useFocusEffect(
+    React.useCallback(() => {
+      load();
+    }, [load])
+  );
 
   if (loading) return <Loading />;
   if (err && !report)
