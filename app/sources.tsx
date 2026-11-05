@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Alert, Linking, ActivityIndicator } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import { api, authApi } from '../src/api';
+import { api } from '../src/api';
 import { Screen, Card, Loading, ErrorBox, Pill, Btn, Field } from '../src/ui';
 import { S, T, type Theme } from '../src/theme';
 import { makeStyles, useTheme } from '../src/theme-provider';
@@ -49,7 +49,6 @@ export default function SourcesScreen() {
   const [editing, setEditing] = React.useState<string | null>(null);
   const [credFields, setCredFields] = React.useState<CredField[]>([]);
   const [form, setForm] = React.useState<Record<string, string>>({});
-  const [isAdmin, setIsAdmin] = React.useState(false);
 
   const load = React.useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -67,7 +66,6 @@ export default function SourcesScreen() {
   useFocusEffect(
     React.useCallback(() => {
       load(true);
-      authApi.me().then((m: any) => setIsAdmin(!!m?.is_admin)).catch(() => {});
     }, [load])
   );
 
@@ -88,17 +86,19 @@ export default function SourcesScreen() {
     }
   };
 
-  const sync = async (src: SourceInfo) => {
+  /** 真正跑同步。days=0 表示全部历史（活动全量 + 最近 30 天恢复数据） */
+  const runSync = async (src: SourceInfo, days: number) => {
     setBusy(src.id);
     try {
-      const days = src.auth === 'oauth' ? 90 : 14;
-      const r = await api.post<any>(`/api/sources/${src.id}/sync?days=${days}`, {}, 120000);
+      // 全量拉取要翻页，几百上千条活动可能跑几十秒，超时给足
+      const timeout = days === 0 ? 300000 : 120000;
+      const r = await api.post<any>(`/api/sources/${src.id}/sync?days=${days}`, {}, timeout);
       const rec = r?.recovery?.recovery_days ?? 0;
       const act = r?.activity?.activities;
-      Alert.alert(
-        '同步完成',
-        `${src.name}：更新 ${rec} 天恢复数据${act != null ? `，新增 ${act} 条训练` : ''}。`
-      );
+      const parts: string[] = [];
+      if (act != null) parts.push(`新增 ${act} 条训练`);
+      if (rec) parts.push(`更新 ${rec} 天恢复数据`);
+      Alert.alert('同步完成', `${src.name}：${parts.length ? parts.join('，') : '没有新数据'}。`);
       await load(true);
     } catch (e: any) {
       Alert.alert('同步没成功', e?.message || '稍后再试');
@@ -106,6 +106,21 @@ export default function SourcesScreen() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const sync = (src: SourceInfo) => {
+    // OAuth 源（Oura）没有历史这个概念，直接同步最近 90 天
+    if (src.auth === 'oauth') return runSync(src, 90);
+    Alert.alert(
+      '同步多少天',
+      '第一次用选「全部历史」，之后日常点「最近 2 周」就够。\n\n全部历史会把跑步记录翻到底，恢复数据只补最近 30 天。',
+      [
+        { text: '全部历史', onPress: () => runSync(src, 0) },
+        { text: '最近 90 天', onPress: () => runSync(src, 90) },
+        { text: '最近 2 周', onPress: () => runSync(src, 14) },
+        { text: '取消', style: 'cancel' },
+      ]
+    );
   };
 
   const disconnect = (src: SourceInfo) => {
@@ -163,8 +178,10 @@ export default function SourcesScreen() {
     setBusy(src.id);
     try {
       const d = await api.get<{ fields: CredField[] }>(`/api/settings/sources/${src.id}`);
-      // 平台级凭据（Oura 应用密钥）只有管理员能看到和修改
-      const fields = (d.fields || []).filter((f) => f.layer === 'user' || isAdmin);
+      // 只显示用户自己的凭据（佳明账号密码）。
+      // Oura 的 client_id / client_secret 属于平台配置，住在服务器 .env 里，
+      // 不该出现在 App 界面上——那是开发者的事，不是用户的。
+      const fields = (d.fields || []).filter((f) => f.layer === 'user');
       setCredFields(fields);
       setForm({});
       setEditing(src.id);
@@ -312,17 +329,11 @@ export default function SourcesScreen() {
                   <Btn title="断开" onPress={() => disconnect(src)} disabled={busy === src.id} small />
                 </>
               )}
-              {personal ? (
+              {/* 「账号」和「填写账号」打开的是同一个表单，所以只在不需要
+                  填写账号时（例如平台已配好、只差连接）才显示，避免两个按钮并排。 */}
+              {personal && !needsCred ? (
                 <Btn
                   title={editing === src.id ? '收起' : '账号'}
-                  onPress={() => toggleCred(src)}
-                  disabled={busy === src.id}
-                  small
-                />
-              ) : null}
-              {isAdmin && src.auth === 'oauth' ? (
-                <Btn
-                  title={editing === src.id ? '收起' : '应用配置'}
                   onPress={() => toggleCred(src)}
                   disabled={busy === src.id}
                   small
