@@ -4,7 +4,6 @@ import { useFocusEffect } from 'expo-router';
 import { api, WeeklyReport, Fitness } from '../api';
 import { Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat, Fold } from '../ui';
 import { Bars, Heatmap, LineChart, Legend } from '../charts';
-import { ActivityList } from '../activityList';
 import { S, T, tsbColor, type Theme } from '../theme';
 import { makeStyles, useTheme } from '../theme-provider';
 import { F } from '../format';
@@ -46,7 +45,6 @@ export default function DataView() {
   const [forecast, setForecast] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
-  const [showActivities, setShowActivities] = React.useState(false);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -345,26 +343,6 @@ export default function DataView() {
           </Card>
         </Section>
       ) : null}
-
-      <Section
-        title="活动记录"
-        right={
-          <Pressable onPress={() => setShowActivities((v) => !v)} hitSlop={10}>
-            <Text style={s.toggle}>{showActivities ? '收起' : '展开'}</Text>
-          </Pressable>
-        }
-      >
-        {showActivities ? (
-          <ActivityList />
-        ) : (
-          <Card>
-            <Pressable onPress={() => setShowActivities(true)} style={s.collapsedRow}>
-              <Text style={s.collapsedText}>查看全部活动记录</Text>
-              <Text style={s.toggle}>展开 ›</Text>
-            </Pressable>
-          </Card>
-        )}
-      </Section>
     </>
   );
 }
@@ -373,7 +351,4 @@ const useStyles = makeStyles((t: Theme) => ({
   meta: { color: t.text3, fontSize: T.caption, lineHeight: 20 },
   def: { color: t.text2, fontSize: T.caption, lineHeight: 21 },
   statRow: { flexDirection: 'row', gap: S.sm },
-  toggle: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
-  collapsedRow: { flexDirection: 'row', alignItems: 'center', gap: S.sm },
-  collapsedText: { color: t.text3, fontSize: T.caption, flex: 1, lineHeight: 20 },
 }));
