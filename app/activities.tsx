@@ -8,19 +8,30 @@ import { makeStyles, useTheme } from '../src/theme-provider';
 import { F } from '../src/format';
 import { ACTIVITY_TYPE, SOURCE, zh } from '../src/labels';
 
+const PAGE = 50;
+
 export default function AllActivitiesScreen() {
   const t = useTheme();
   const s = useStyles();
   const router = useRouter();
   const [items, setItems] = React.useState<Activity[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [hasMore, setHasMore] = React.useState(false);
+  const [loadingMore, setLoadingMore] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
 
   const load = React.useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const d = await api.get<{ activities: Activity[] }>('/api/activities');
+      const d = await api.get<{
+        activities: Activity[];
+        total?: number;
+        has_more?: boolean;
+      }>(`/api/activities?limit=${PAGE}&offset=0`);
       setItems(d.activities || []);
+      setTotal(d.total ?? (d.activities || []).length);
+      setHasMore(!!d.has_more);
       setErr(null);
     } catch (e: any) {
       if (!quiet) setErr(e?.message || '加载失败');
@@ -28,6 +39,26 @@ export default function AllActivitiesScreen() {
       setLoading(false);
     }
   }, []);
+
+  const loadMore = React.useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const d = await api.get<{
+        activities: Activity[];
+        total?: number;
+        has_more?: boolean;
+      }>(`/api/activities?limit=${PAGE}&offset=${items.length}`);
+      const next = d.activities || [];
+      setItems((cur) => [...cur, ...next]);
+      setTotal(d.total ?? items.length + next.length);
+      setHasMore(!!d.has_more);
+    } catch (e: any) {
+      setErr(e?.message || '加载失败');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [items.length, loadingMore]);
 
   /**
    * 每次回到这一页都重新取一次。
@@ -58,7 +89,9 @@ export default function AllActivitiesScreen() {
 
   return (
     <Screen noTabBar>
-      <Text style={s.hint}>共 {items.length} 条活动，点开可看速度、心率和海拔</Text>
+      <Text style={s.hint}>
+        共 {total} 条活动{items.length < total ? ` · 已加载 ${items.length} 条` : ''}，点开可看速度、心率和海拔
+      </Text>
       {items.length === 0 ? (
         <Empty text="暂无活动记录" />
       ) : (
@@ -86,6 +119,13 @@ export default function AllActivitiesScreen() {
           </Pressable>
         ))
       )}
+      {hasMore ? (
+        <Pressable onPress={loadMore} disabled={loadingMore} style={s.more}>
+          <Text style={s.moreText}>
+            {loadingMore ? '加载中…' : `加载更多（还有 ${Math.max(0, total - items.length)} 条）`}
+          </Text>
+        </Pressable>
+      ) : null}
     </Screen>
   );
 }
@@ -97,4 +137,6 @@ const useStyles = makeStyles((t: Theme) => ({
   meta: { color: t.text3, fontSize: T.caption, marginTop: 5, lineHeight: 19 },
   notes: { color: t.text3, fontSize: T.micro + 1, marginTop: 3 },
   arrow: { color: t.text3, fontSize: 26, marginLeft: S.sm, fontWeight: '300' },
+  more: { alignItems: 'center', paddingVertical: S.md },
+  moreText: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
 }));
