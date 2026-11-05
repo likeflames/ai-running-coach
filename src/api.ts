@@ -8,12 +8,17 @@ import { API_CANDIDATES, STORAGE_TOKEN_KEY } from './config';
  * 之前设 30s，配上「fetch 失败再换 XHR」的串行重试，最坏要干等 60 秒才报错，
  * 而这个 60 秒里往往是服务器正在重启 —— 等它重启完早就好了。所以压到 12s。 */
 const DEFAULT_TIMEOUT = 12000;
-const PROBE_TIMEOUT = 5000;
+/* 首选地址（域名）的连接超时。域名被运营商/云厂商拦掉时通常是 RST，毫秒级失败；
+ * 但万一变成静默丢包，不能让用户按 12s 干等，3 秒就降级到 IP。 */
+const PRIMARY_CONNECT_TIMEOUT = 3000;
 /* 换过一次键名：旧版记住的是 http://IP，改域名优先后如果不换键，
  * 覆盖安装的用户会一直被旧记忆绑在明文 IP 上（orderedBases 把记住的地址排第一，
  * 而且内网 IP 响应比 TLS 握手快，几乎每次都赢）。换键 = 让旧记忆自然失效。
- * 以后再换主地址，同样改这里的版本号即可。 */
-const STORAGE_KEY = 'apiBaseV2';
+ * 以后再换主地址，同样改这里的版本号即可。
+ *
+ * 2026-11-05 第二次换键（V2→V3）：runcoach.site 未备案被封，App 降级到 IP 后
+ * 把 IP 记进了 V2，等备案恢复也回不到 HTTPS。V3 让这批记忆一并失效。 */
+const STORAGE_KEY = 'apiBaseV3';
 
 /* 默认就认首选地址可用：这样首次启动的长请求（同步/流式对话）能拿到完整超时，
  * 而不是被当成「探测」只给 5 秒。真连不上时，并发候选会兜住并自动切换。 */
@@ -138,8 +143,14 @@ const ready: Promise<void> = (async () => {
 })();
 
 function orderedBases(): string[] {
-  if (!activeBase) return API_CANDIDATES;
-  return [activeBase, ...API_CANDIDATES.filter((b) => b !== activeBase)];
+  /* 固定用配置顺序（域名优先、IP 兜底），不按「上次成功的地址」排序。
+   *
+   * 原来把记忆里的地址排第一是为了少探测一次，但 2026-11-05 踩到了：
+   * runcoach.site 未备案被拦期间降级到 IP，记忆里存下 IP；而 IP 响应总比
+   * TLS 握手快，等域名恢复后它仍然每次先赢 —— 用户被永久钉在明文地址上。
+   * 现在域名永远第一，只有它失败才走 IP。域名不通时是 RST（毫秒级），
+   * 备案等待期的代价只有几十毫秒，换来的是恢复后自动回到 HTTPS。 */
+  return API_CANDIDATES;
 }
 
 /** 给请求头补上口令 */
@@ -265,65 +276,58 @@ async function request<T = any>(
   await ready;
   const gen = generation;
   const bases = orderedBases();
+  const notes: string[] = [];
+  let bizFail: { status?: number; error: Error } | null = null;
 
-  // 多个候选地址并行发，谁先成功用谁（避免逐个超时干等）
-  return new Promise<T>((resolve, reject) => {
-    let pending = bases.length;
-    let bizFail: { status?: number; error: Error } | null = null;
-    let settled = false;
-    const notes: string[] = [];
+  /* 按顺序试，不再并行。
+   *
+   * 并行时「谁先返回用谁」，而 IP 的往返总比 TLS 握手快（0.03s vs 0.3s），
+   * 于是域名永远抢不到 —— 这就是备案恢复后仍然走明文 IP 的根因。
+   * 改成串行后，域名只要能用就一定用它，代价是它不通时多花一次 RST 的时间。 */
+  for (let i = 0; i < bases.length; i++) {
+    const base = bases[i];
+    if (!isSessionCurrent(gen)) throw new SessionChangedError();
 
-    const finish = () => {
-      if (settled) return;
-      settled = true;
+    // 首选地址（域名）给短超时，它不通时不该让用户按 12s 干等
+    const timeout = i === 0 ? Math.min(timeoutMs, PRIMARY_CONNECT_TIMEOUT) : timeoutMs;
+    const started = Date.now();
+    const r = await rawRequest<T>(`${base}${path}`, options, timeout);
 
+    if (r.ok) {
       // 请求发出后用户换了账号：旧结果一律丢弃，不能显示到新账号界面上
-      if (!isSessionCurrent(gen)) return reject(new SessionChangedError());
-
-      if (bizFail) {
-        if (bizFail.status === 401 && promptOn401) {
-          // 密码登录没有「再输一次口令」这条路，直接回登录页
-          setAccessToken('').finally(() => logoutHandler?.());
-          return reject(new Error('登录已失效，请重新登录'));
-        }
-        return reject(bizFail.error);
+      if (!isSessionCurrent(gen)) throw new SessionChangedError();
+      if (activeBase !== base) {
+        activeBase = base;
+        AsyncStorage.setItem(STORAGE_KEY, base).catch(() => {});
       }
+      return r.data;
+    }
 
-      reject(new Error('连不上服务器，检查网络后再试'));
-    };
+    if (!r.network) {
+      // 服务器有响应（业务错误）：鉴权失败跟地址无关，换地址也一样，直接收工；
+      // 其他业务错误再试下一个地址（可能是这条链路的问题）。
+      if (!bizFail) bizFail = { status: r.status, error: r.error };
+      if (r.status === 401) break;
+      continue;
+    }
 
-    bases.forEach((base) => {
-      const isActive = base === activeBase;
-      const timeout = isActive ? timeoutMs : Math.min(timeoutMs, PROBE_TIMEOUT);
-      const started = Date.now();
+    const secs = ((Date.now() - started) / 1000).toFixed(1);
+    notes.push(`${base.replace(/^https?:\/\//, '')}：${r.error.message}（${secs}s）`);
+  }
 
-      rawRequest<T>(`${base}${path}`, options, timeout)
-        .then((r) => {
-          if (r.ok) {
-            if (settled) return;
-            settled = true;
-            if (!isSessionCurrent(gen)) return reject(new SessionChangedError());
-            if (activeBase !== base) {
-              activeBase = base;
-              AsyncStorage.setItem(STORAGE_KEY, base).catch(() => {});
-            }
-            resolve(r.data);
-            return;
-          }
-          if (!r.network) {
-            // 服务器有响应（业务错误），记下来备用
-            if (!bizFail) bizFail = { status: r.status, error: r.error };
-          } else {
-            const secs = ((Date.now() - started) / 1000).toFixed(1);
-            notes.push(`${base.replace(/^https?:\/\//, '')}：${r.error.message}（${secs}s）`);
-          }
-          if (--pending === 0) finish();
-        })
-        .catch(() => {
-          if (--pending === 0) finish();
-        });
-    });
-  });
+  if (bizFail) {
+    if (bizFail.status === 401 && promptOn401) {
+      // 密码登录没有「再输一次口令」这条路，直接回登录页
+      await setAccessToken('');
+      logoutHandler?.();
+      throw new Error('登录已失效，请重新登录');
+    }
+    throw bizFail.error;
+  }
+
+  throw new Error(
+    notes.length ? `连不上服务器（${notes.join('；')}）` : '连不上服务器，检查网络后再试'
+  );
 }
 
 function qs(params: Record<string, string | number | undefined>) {
@@ -439,13 +443,25 @@ function sseOnce(
   path: string,
   form: FormData | null,
   onEvent: (ev: ChatEvent) => void,
-  timeoutMs = 300000
+  timeoutMs = 300000,
+  firstByteMs = 0
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     let seen = 0;
     let buf = '';
     let started = false;
+    let guard: any = null;
+
+    /* 首字节超时：timeoutMs 是整段流的总时长（对话要 30–40 秒），
+     * 拿它当「连不上」的判断会让人干等几分钟。地址不通时另设一个短的连接超时，
+     * 到这个点还没有任何数据就换下一个候选地址。 */
+    const clearGuard = () => {
+      if (guard) {
+        clearTimeout(guard);
+        guard = null;
+      }
+    };
 
     const handle = (block: string) => {
       for (const line of block.split('\n')) {
@@ -456,6 +472,7 @@ function sseOnce(
         try {
           const ev = JSON.parse(payload) as ChatEvent;
           started = true;
+          clearGuard();
           onEvent(ev);
         } catch {
           /* 忽略坏包 */
@@ -476,6 +493,7 @@ function sseOnce(
     };
 
     const fail = (msg: string, status?: number) => {
+      clearGuard();
       const err: any = new Error(msg);
       err.started = started;
       err.status = status;
@@ -488,6 +506,7 @@ function sseOnce(
     xhr.timeout = timeoutMs;
     xhr.onprogress = flush;
     xhr.onload = () => {
+      clearGuard();
       flush();
       if (xhr.status >= 400) {
         let detail = '';
@@ -509,6 +528,20 @@ function sseOnce(
     xhr.ontimeout = () => fail('请求超时');
     xhr.onabort = () => fail('已取消');
 
+    if (firstByteMs > 0) {
+      guard = setTimeout(() => {
+        guard = null;
+        if (started) return;
+        // 到点还没收到任何事件：当成连不上，中断后交给外层换地址
+        try {
+          xhr.abort();
+        } catch {
+          /* ignore */
+        }
+        fail('连接超时');
+      }, firstByteMs);
+    }
+
     xhr.send((form as any) || null);
   });
 }
@@ -518,12 +551,13 @@ function streamOnce(
   base: string,
   message: string,
   history: { role: string; content: string }[],
-  onEvent: (ev: ChatEvent) => void
+  onEvent: (ev: ChatEvent) => void,
+  firstByteMs = 0
 ): Promise<void> {
   const fd = new FormData();
   fd.append('message', message);
   fd.append('history', JSON.stringify(history || []));
-  return sseOnce(base, '/api/chat/stream', fd, onEvent);
+  return sseOnce(base, '/api/chat/stream', fd, onEvent, 300000, firstByteMs);
 }
 
 /**
@@ -542,12 +576,14 @@ export async function adviceStream(
   const path = fresh ? '/api/daily-advice/stream?fresh=1' : '/api/daily-advice/stream';
   let lastError: Error | null = null;
 
-  for (const base of bases) {
+  for (let i = 0; i < bases.length; i++) {
+    const base = bases[i];
     if (!isSessionCurrent(gen)) throw new SessionChangedError();
     try {
+      // 第一个候选（域名）给首字节超时，连不上就换 IP；一旦开始出数据就不再切换
       await sseOnce(base, path, null, (ev) => {
         if (isSessionCurrent(gen)) onEvent(ev);
-      }, 180000);
+      }, 180000, i === 0 ? PRIMARY_CONNECT_TIMEOUT : 0);
       return;
     } catch (e: any) {
       if (e?.started) throw e;
@@ -578,12 +614,13 @@ export async function chatStream(
   const bases = orderedBases();
   let lastError: Error | null = null;
 
-  for (const base of bases) {
+  for (let i = 0; i < bases.length; i++) {
+    const base = bases[i];
     if (!isSessionCurrent(gen)) throw new SessionChangedError();
     try {
       await streamOnce(base, message, history, (ev) => {
         if (isSessionCurrent(gen)) onEvent(ev);
-      });
+      }, i === 0 ? PRIMARY_CONNECT_TIMEOUT : 0);
       return;
     } catch (e: any) {
       if (e?.started) throw e;
