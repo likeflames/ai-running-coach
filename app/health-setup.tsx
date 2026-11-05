@@ -253,7 +253,7 @@ const useStyles = makeStyles((t: Theme) => ({
   copyLabel: { color: t.text3, fontSize: T.micro },
   copyValue: { fontSize: T.caption, marginTop: 3 },
   copyBtn: { fontSize: T.caption, fontWeight: '600' },
-  warn: { color: t.text3, fontSize: T.micro, lineHeight: 18, marginTop: S.sm },
+  warn: { color: t.text3, fontSize: T.caption, lineHeight: 20, marginTop: S.sm },
   fieldRow: { flexDirection: 'row', paddingVertical: 8, borderTopWidth: 0.5, gap: S.sm },
   fieldKey: { fontSize: T.caption, width: 130 },
   fieldDesc: { flex: 1, fontSize: T.caption },

@@ -212,8 +212,8 @@ export default function ProfileScreen() {
               }
             }}
           />
-          <Text style={{ color: t.text3, fontSize: 11, marginTop: 6, lineHeight: 16 }}>
-            取已同步活动里最快的 5 公里；无 5 公里记录时用 3–21 km 折算。手填成绩不会被覆盖。
+          <Text style={{ color: t.text3, fontSize: T.caption, marginTop: 6, lineHeight: 20 }}>
+            取最快 5 公里；无记录时用 3–21 公里折算。手填成绩不会被覆盖。
           </Text>
         </View>
       </ScrollView>
@@ -266,6 +266,6 @@ const useStyles = makeStyles((t: Theme) => ({
     paddingVertical: 12,
     fontSize: 17,
   },
-  hint: { fontSize: T.micro, lineHeight: 17, marginTop: 5 },
+  hint: { fontSize: T.caption, lineHeight: 20, marginTop: 5 },
   err: { fontSize: T.caption, paddingHorizontal: S.md, marginTop: S.sm },
 }));

@@ -41,6 +41,7 @@ function AppShell() {
           <Stack.Screen name="settings" options={{ title: '我的' }} />
           <Stack.Screen name="profile" options={{ title: '个人资料' }} />
           <Stack.Screen name="model-config" options={{ title: '教练服务' }} />
+          <Stack.Screen name="data" options={{ title: '数据' }} />
         </Stack>
       </TokenGate>
     </>

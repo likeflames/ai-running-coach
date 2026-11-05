@@ -7,25 +7,23 @@ import {
   ScheduleDay,
   StrengthProgramme,
   StrengthBlock,
-} from '../../../src/api';
-import { Screen, Card, CardHead, Section, Loading, ErrorBox, Empty, Pill, Stat, Btn } from '../../../src/ui';
-import { S, T, R, TNUM, alpha, type Theme } from '../../../src/theme';
-import { makeStyles, useTheme } from '../../../src/theme-provider';
+} from '../api';
+import { Card, CardHead, Section, Loading, ErrorBox, Pill, Stat, Btn, Fold } from '../ui';
+import { Bars } from '../charts';
+import { S, T, R, TNUM, alpha, type Theme } from '../theme';
+import { makeStyles, useTheme } from '../theme-provider';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { PbBadge } from '../../../src/personalize';
-import { F } from '../../../src/format';
-import { PHASE, PACE_ZONE, WORKOUT_TYPE, restLabel, setsLabel, zh } from '../../../src/labels';
+import { PbBadge } from '../personalize';
+import { F } from '../format';
+import { PHASE, PACE_ZONE, WORKOUT_TYPE, restLabel, setsLabel, zh } from '../labels';
 
-function verdictOf(t: Theme, verdict: string) {
-  const map: Record<string, { color: string; label: string }> = {
-    ok: { color: t.good, label: '可以照着练' },
-    review: { color: t.warn, label: '有两处要留意' },
-    block: { color: t.bad, label: '先改再练' },
-  };
-  return map[verdict] || null;
-}
-
-export default function TrainingScreen() {
+/**
+ * build 15：训练页只给最近两周、不再堆文字说明。
+ * 「为什么这样排」「这份计划安全吗？」两整段文字卡片已删除；
+ * 排课依据压成一行标签，配速区间默认折叠，每天内容用柱状图先看轮廓。
+ * 本组件不含 Screen，由 app/(tabs)/plan/index.tsx 统一提供滚动容器。
+ */
+export default function TrainingView({ reloadKey = 0 }: { reloadKey?: number }) {
   const t = useTheme();
   const s = useStyles();
   const router = useRouter();
@@ -33,8 +31,6 @@ export default function TrainingScreen() {
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [openWeek, setOpenWeek] = React.useState<number | null>(null);
-  const [showPrinciples, setShowPrinciples] = React.useState(true);
-  const [showPaces, setShowPaces] = React.useState(false);
   const [done, setDone] = React.useState<Record<string, boolean>>({});
 
   const load = React.useCallback(async () => {
@@ -52,9 +48,8 @@ export default function TrainingScreen() {
     }
   }, []);
 
-  // 标签页常驻，useEffect 只在挂载跑一次：填完档案返回时不会刷新，
-  // 会一直停在旧的「需要 5 公里成绩」提示上。每次获得焦点都重拉。
   useFocusEffect(React.useCallback(() => { load(); }, [load]));
+  React.useEffect(() => { if (reloadKey) load(); }, [reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkin = (day: string) => {
     Alert.prompt?.('打卡', '实际跑了多少公里？（可留空）', async (km) => {
@@ -88,62 +83,52 @@ export default function TrainingScreen() {
   };
 
   if (loading && !data) return <Loading />;
-  if (err && !data)
-    return (
-      <Screen>
-        <ErrorBox message={err} onRetry={load} />
-      </Screen>
-    );
+  if (err && !data) return <ErrorBox message={err} onRetry={load} />;
   if (!data) return null;
 
-  // 新用户没填目标 / 5 公里成绩时，后端只回 {"needs_profile": true, "reason": ...}，
-  // 没有 weeks。这里不拦住的话，下面的 data.weeks.find 会直接白屏。
   if (!data.weeks?.length) {
     return (
-      <Screen>
-        <Card>
-          <CardHead title="还没有训练计划" />
-          <Text style={s.summary}>
-            {(data as any).reason || '课表暂时读不出来，下拉重试或稍后再试。'}
-          </Text>
-          <View style={{ height: S.md }} />
-          <Btn title="去完善资料" onPress={() => router.push('/profile')} primary small />
-        </Card>
-      </Screen>
+      <Card>
+        <CardHead title="还没有训练计划" />
+        <Text style={s.summary}>{(data as any).reason || '课表暂时读不出来，点右上角刷新重试。'}</Text>
+        <View style={{ height: S.md }} />
+        <Btn title="去完善资料" onPress={() => router.push('/profile')} primary small />
+      </Card>
     );
   }
 
-  const g = data.guardrail;
-  const v = g ? verdictOf(t, g.verdict) : null;
-  const thisWeek = data.weeks.find((w) => w.days?.some((x) => x.is_today)) || data.weeks[0];
+  // 最近两周：含今天这一周 + 下一周。12 周全展开在手机上没法看。
+  const idx = data.weeks.findIndex((w) => w.days?.some((x) => x.is_today));
+  const start = idx >= 0 ? idx : 0;
+  const recent = data.weeks.slice(start, start + 2);
+  const thisWeek = data.weeks[start];
 
   return (
-    <Screen>
+    <>
       <PbBadge pb={(data as any).pb} />
 
-      {/* 概览 */}
       <Card>
-        <CardHead title="训练计划" right={<Pill text={`${data.weeks.length} 周`} />} />
+        <CardHead
+          title="训练计划"
+          right={<Pill text={data.plan_basis ? `${data.plan_basis.race_label}专项` : '课表'} />}
+        />
         <View style={{ flexDirection: 'row', gap: S.sm }}>
           <Stat label="比赛日期" value={data.race_date || '-'} />
           <Stat label="跑步能力值" value={F.num(data.vdot, 1)} big />
         </View>
         {thisWeek ? (
           <Text style={s.summary}>
-            本周：跑 {thisWeek.run_days} 天 · 力量 {thisWeek.strength.sessions} 次（
-            {thisWeek.strength.sessions_required} 次必做）· {thisWeek.phase_label}
+            本周：跑 {thisWeek.run_days} 天 · 力量 {thisWeek.strength.sessions} 次 ·{' '}
+            {thisWeek.phase_label}
           </Text>
         ) : null}
         {data.plan_basis ? (
-          <Text style={{ color: t.text3, fontSize: 11, lineHeight: 17, marginTop: 8 }}>
-            {`按${data.plan_basis.race_label}专项排课 · 起点 ${data.plan_basis.start_km} km/周\n${data.plan_basis.start_detail}；${data.plan_basis.race_detail}`}
-          </Text>
+          <Text style={s.basis}>起点 {data.plan_basis.start_km} 公里/周</Text>
         ) : null}
       </Card>
 
-      {/* 合并课表 */}
-      <Section title="每天练什么" desc="力量已排进跑步日">
-        {data.weeks.map((w) => (
+      <Section title="最近两周" desc="点开看每天内容">
+        {recent.map((w) => (
           <WeekCard
             key={w.week}
             week={w}
@@ -157,37 +142,8 @@ export default function TrainingScreen() {
         ))}
       </Section>
 
-      {/* 排布原则 */}
-      <Section
-        title="为什么这样排"
-        right={
-          <Pressable onPress={() => setShowPrinciples((x) => !x)} hitSlop={10}>
-            <Text style={s.tip}>{showPrinciples ? '收起' : '展开'}</Text>
-          </Pressable>
-        }
-      >
-        {showPrinciples ? (
-          <Card>
-            {data.principles?.map((p, i) => (
-              <View key={i} style={s.ruleRow}>
-                <View style={[s.ruleBullet, { backgroundColor: t.purple }]} />
-                <Text style={s.ruleText}>{p}</Text>
-              </View>
-            ))}
-          </Card>
-        ) : null}
-      </Section>
-
-      {/* 配速区间 */}
-      <Section
-        title="配速区间"
-        right={
-          <Pressable onPress={() => setShowPaces((x) => !x)} hitSlop={10}>
-            <Text style={s.tip}>{showPaces ? '收起' : '展开'}</Text>
-          </Pressable>
-        }
-      >
-        {showPaces ? (
+      <Section title="配速区间">
+        <Fold label="查看各配速区间">
           <Card>
             {Object.entries(data.paces || {}).map(([k, val], i, arr) => (
               <View
@@ -199,45 +155,9 @@ export default function TrainingScreen() {
               </View>
             ))}
           </Card>
-        ) : null}
+        </Fold>
       </Section>
-
-      {/* 安全护栏 */}
-      {g && v ? (
-        <Section title="这份计划安全吗？">
-          <Card tint={v.color}>
-            <Text style={{ color: v.color, fontSize: T.title, fontWeight: '600', letterSpacing: -0.3, marginBottom: 8 }}>
-              {v.label}
-            </Text>
-            <Text style={s.body}>{g.summary}</Text>
-            <Text style={[s.meta, { marginTop: 6 }]}>
-              最近 4 周平均每周 {F.num(g.context?.avg_4w_km, 1)} 公里 · 最近 7 天跑了{' '}
-              {F.num(g.context?.this_week_load_km, 1)} 公里
-            </Text>
-            {g.rules
-              ?.filter((r) => r.severity !== 'info')
-              .map((r) => (
-                <View key={r.id} style={[s.ruleBox, { borderTopColor: t.border }]}>
-                  <Text
-                    style={{
-                      color: r.severity === 'block' ? t.bad : t.warn,
-                      fontSize: T.caption,
-                      fontWeight: '600',
-                      marginBottom: 3,
-                    }}
-                  >
-                    {r.severity === 'block' ? '⛔ ' : '⚠️ '}
-                    {r.title || '需要注意'}
-                  </Text>
-                  <Text style={s.ruleBody}>{r.message}</Text>
-                  {r.action ? <Text style={s.ruleAction}>怎么办：{r.action}</Text> : null}
-                </View>
-              ))}
-            <Text style={s.footNote}>检查项：周加量 · 连续训练周数 · 低状态时的强度课</Text>
-          </Card>
-        </Section>
-      ) : null}
-    </Screen>
+    </>
   );
 }
 
@@ -263,6 +183,7 @@ function WeekCard({
   const t = useTheme();
   const s = useStyles();
   const hasToday = week.days.some((d) => d.is_today);
+  const km = week.days.map((d) => (d.run && d.run.type !== 'rest' ? Number(d.run.distance_km) || 0 : 0));
   return (
     <Card style={{ padding: 0, overflow: 'hidden', marginBottom: S.sm + 2 }}>
       <Pressable onPress={onToggle} style={s.weekHead}>
@@ -278,9 +199,18 @@ function WeekCard({
         <Pill text={week.phase_label || zh(PHASE, week.phase, '常规')} color={t.purple} />
       </Pressable>
 
+      <View style={s.weekBars}>
+        <Bars
+          values={km}
+          labels={week.days.map((d) => d.weekday)}
+          height={78}
+          color={t.accent}
+          highlightLast={false}
+        />
+      </View>
+
       {open ? (
         <>
-          {week.strength.note ? <Text style={s.weekNote}>{week.strength.note}</Text> : null}
           {week.days.map((d, i) => (
             <DayRow
               key={d.date}
@@ -339,15 +269,14 @@ function DayRow({
             </Pressable>
           </View>
         ) : null}
-        {ov?.note ? <Text style={s.overrideNote}>{ov.note}</Text> : null}
 
         {isRest ? (
           <Text style={[s.rest, day.is_today && { color: t.text2 }]}>
-            {ov?.type === 'strength' ? '力量训练（教练安排）' : '休息'}
+            {ov?.type === 'strength' ? '力量训练' : '休息'}
           </Text>
         ) : (
           <View style={[s.item, { borderLeftColor: t.accent }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 5 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 5, flexWrap: 'wrap' }}>
               <Text style={s.itemTitle}>{zh(WORKOUT_TYPE, run!.type, '训练')}</Text>
               <Text style={[s.itemKm, { color: t.accent }]}>{F.num(run!.distance_km, 1)}</Text>
               <Text style={s.itemUnit}>公里</Text>
@@ -355,11 +284,6 @@ function DayRow({
                 <Text style={s.itemPace}>@ {run!.target_pace}</Text>
               ) : null}
             </View>
-            {run!.description ? (
-              <Text style={s.itemDesc} numberOfLines={2}>
-                {run!.description}
-              </Text>
-            ) : null}
           </View>
         )}
 
@@ -376,8 +300,6 @@ function DayRow({
               </Text>
               <Pill text={day.strength.optional ? '可选' : '必做'} color={day.strength.optional ? t.text3 : t.purple} />
             </View>
-            <Text style={s.itemDesc}>{day.strength.reason}</Text>
-            {day.strength.caution ? <Text style={s.caution}>{day.strength.caution}</Text> : null}
           </View>
         ) : null}
       </View>
@@ -394,7 +316,7 @@ function DayRow({
             },
           ]}
         >
-          <Text style={{ color: done ? t.good : t.accent, fontSize: T.micro + 0.5, fontWeight: '600' }}>
+          <Text style={{ color: done ? t.good : t.accent, fontSize: T.caption, fontWeight: '600' }}>
             {done ? '已打卡' : '打卡'}
           </Text>
         </Pressable>
@@ -415,15 +337,14 @@ function StrengthBlockView({ programme }: { programme: StrengthProgramme }) {
         <View style={{ flex: 1 }}>
           <Text style={s.strengthTitle}>本周力量方案 · {programme.phase_label}</Text>
           <Text style={s.meta}>
-            {programme.emphasis_label || ''} · {programme.duration_min} 分钟 · 共 {programme.blocks?.length || 0} 个动作
+            {programme.emphasis_label || ''} · {programme.duration_min} 分钟 · {programme.blocks?.length || 0} 个动作
           </Text>
         </View>
-        <Text style={s.tip}>{open ? '收起 ▴' : '看动作 ▾'}</Text>
+        <Text style={s.tip}>{open ? '收起' : '看动作'}</Text>
       </Pressable>
 
       {open ? (
         <View style={{ marginTop: S.sm }}>
-          {programme.purpose ? <Text style={s.body}>{programme.purpose}</Text> : null}
           {programme.warmup?.length ? (
             <Text style={s.warmup}>热身：{programme.warmup.map((w) => w.name).join('、')}</Text>
           ) : null}
@@ -432,18 +353,6 @@ function StrengthBlockView({ programme }: { programme: StrengthProgramme }) {
               <ExerciseRow key={i} block={b} index={i + 1} />
             ))}
           </View>
-          {programme.notes?.length ? (
-            <View style={[s.notes, { borderTopColor: t.border }]}>
-              {programme.notes.map((n, i) => (
-                <Text key={i} style={s.noteLine}>
-                  · {n}
-                </Text>
-              ))}
-            </View>
-          ) : null}
-          {programme.cooldown?.length ? (
-            <Text style={s.warmup}>收尾：{programme.cooldown.map((w) => w.name).join('、')}</Text>
-          ) : null}
         </View>
       ) : null}
     </View>
@@ -465,18 +374,13 @@ function ExerciseRow({ block, index }: { block: StrengthBlock; index: number }) 
             {e.name}
             {block.each_side ? <Text style={s.exSide}>（每侧）</Text> : null}
           </Text>
-          <Text style={s.exTargets}>
-            {e.targets?.join('、')}
-            {e.equipment_label ? ` · ${e.equipment_label}` : ''}
-          </Text>
+          <Text style={s.exTargets}>{e.targets?.join('、')}</Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={s.exSets}>{setsLabel(block.sets, block.reps, block.seconds)}</Text>
           <Text style={s.exTargets}>休息 {restLabel(block.rest_s)}</Text>
         </View>
       </View>
-
-      {block.load ? <Text style={s.load}>负荷：{block.load}</Text> : null}
 
       <Text style={s.toggle}>{open ? '收起动作要领 ▴' : '看动作要领 ▾'}</Text>
 
@@ -488,7 +392,6 @@ function ExerciseRow({ block, index }: { block: StrengthBlock; index: number }) 
             </Text>
           ))}
           {block.tempo ? <Text style={s.cue}>节奏：{block.tempo}</Text> : null}
-          <Text style={s.warnText}>出现尖锐疼痛（不是单纯的肌肉酸痛）就停下。</Text>
         </View>
       ) : null}
     </Pressable>
@@ -496,32 +399,20 @@ function ExerciseRow({ block, index }: { block: StrengthBlock; index: number }) 
 }
 
 const useStyles = makeStyles((t: Theme) => ({
-  meta: { color: t.text3, fontSize: T.micro + 1, lineHeight: 18 },
-  body: { color: t.text2, fontSize: T.caption, lineHeight: 21, marginTop: 6 },
-  summary: { color: t.text2, fontSize: T.caption, marginTop: S.sm, lineHeight: 20 },
-  tip: { color: t.accent, fontSize: T.micro + 1, fontWeight: '500' },
+  meta: { color: t.text3, fontSize: T.caption, lineHeight: 20 },
+  summary: { color: t.text2, fontSize: T.caption + 1, marginTop: S.sm, lineHeight: 22 },
+  basis: { color: t.text3, fontSize: T.caption, marginTop: 6 },
+  tip: { color: t.accent, fontSize: T.caption, fontWeight: '500' },
 
   paceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    paddingVertical: 11,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   paceName: { color: t.text2, fontSize: T.body },
-  paceVal: { color: t.accent, fontSize: T.body + 1, fontWeight: '600', ...TNUM },
-
-  ruleRow: { flexDirection: 'row', gap: 9, marginVertical: 6, alignItems: 'flex-start' },
-  ruleBullet: { width: 5, height: 5, borderRadius: 3, marginTop: 8 },
-  ruleText: { color: t.text2, fontSize: T.caption, flex: 1, lineHeight: 21 },
-  ruleBox: {
-    marginTop: S.md,
-    paddingTop: S.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  ruleBody: { color: t.text2, fontSize: T.caption, lineHeight: 21 },
-  ruleAction: { color: t.accent, fontSize: T.caption, lineHeight: 21, marginTop: 2 },
-  footNote: { color: t.text3, fontSize: T.micro + 1, lineHeight: 19, marginTop: S.md },
+  paceVal: { color: t.accent, fontSize: T.body + 2, fontWeight: '600', ...TNUM },
 
   weekHead: {
     flexDirection: 'row',
@@ -531,14 +422,8 @@ const useStyles = makeStyles((t: Theme) => ({
     gap: S.sm,
   },
   weekTitle: { color: t.text, fontSize: T.body + 1, fontWeight: '600', letterSpacing: -0.2 },
-  weekMeta: { color: t.text3, fontSize: T.micro + 1, marginTop: 4, ...TNUM },
-  weekNote: {
-    color: t.warn,
-    fontSize: T.micro + 1,
-    paddingHorizontal: S.md + 2,
-    paddingBottom: 8,
-    lineHeight: 18,
-  },
+  weekMeta: { color: t.text3, fontSize: T.caption, marginTop: 4, ...TNUM },
+  weekBars: { paddingHorizontal: S.md + 2, paddingBottom: S.md },
 
   dayRow: {
     flexDirection: 'row',
@@ -550,25 +435,17 @@ const useStyles = makeStyles((t: Theme) => ({
   },
   dayLeft: { width: 46, paddingTop: 1 },
   dayWeekday: { color: t.text2, fontSize: T.caption, fontWeight: '600' },
-  dayDate: { color: t.text3, fontSize: T.micro, marginTop: 2, ...TNUM },
+  dayDate: { color: t.text3, fontSize: T.caption - 1, marginTop: 2, ...TNUM },
   rest: { color: t.text3, fontSize: T.caption, paddingTop: 2 },
   overrideRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  restoreText: { color: t.accent, fontSize: T.micro + 1, fontWeight: '500' },
-  overrideNote: { color: t.text3, fontSize: T.micro + 1, lineHeight: 18 },
+  restoreText: { color: t.accent, fontSize: T.caption },
 
-  item: {
-    borderLeftWidth: 2.5,
-    paddingLeft: 9,
-    paddingVertical: 3,
-    borderRadius: 2,
-  },
+  item: { borderLeftWidth: 2.5, paddingLeft: 9, paddingVertical: 3, borderRadius: 2 },
   itemHead: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   itemTitle: { color: t.text, fontSize: T.body, fontWeight: '600' },
   itemKm: { fontSize: T.title + 4, fontWeight: '600', letterSpacing: -0.8, ...TNUM },
-  itemUnit: { color: t.text3, fontSize: T.micro + 1 },
-  itemPace: { color: t.text3, fontSize: T.micro + 1, ...TNUM },
-  itemDesc: { color: t.text3, fontSize: T.micro + 1, marginTop: 4, lineHeight: 18 },
-  caution: { color: t.warn, fontSize: T.micro + 1, marginTop: 4, lineHeight: 18 },
+  itemUnit: { color: t.text3, fontSize: T.caption },
+  itemPace: { color: t.text3, fontSize: T.caption, ...TNUM },
   checkin: {
     marginTop: 2,
     paddingHorizontal: 10,
@@ -577,33 +454,18 @@ const useStyles = makeStyles((t: Theme) => ({
     alignSelf: 'flex-start',
   },
 
-  strengthBox: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    padding: S.md + 2,
-  },
+  strengthBox: { borderTopWidth: StyleSheet.hairlineWidth, padding: S.md + 2 },
   strengthHead: { flexDirection: 'row', alignItems: 'center' },
-  strengthTitle: { color: t.purple, fontSize: T.caption, fontWeight: '600' },
-  warmup: { color: t.text3, fontSize: T.micro + 1, marginTop: S.sm, lineHeight: 19 },
-  notes: { marginTop: S.sm, paddingTop: S.sm, borderTopWidth: StyleSheet.hairlineWidth },
-  noteLine: { color: t.text3, fontSize: T.micro + 1, lineHeight: 20 },
+  strengthTitle: { color: t.purple, fontSize: T.caption + 1, fontWeight: '600' },
+  warmup: { color: t.text3, fontSize: T.caption, marginTop: S.sm, lineHeight: 20 },
 
-  exRow: {
-    paddingVertical: 11,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
+  exRow: { paddingVertical: 11, borderTopWidth: StyleSheet.hairlineWidth },
   exHead: { flexDirection: 'row', justifyContent: 'space-between' },
   exName: { color: t.text, fontSize: T.body, fontWeight: '500' },
-  exSide: { color: t.text3, fontSize: T.micro, fontWeight: '400' },
-  exTargets: { color: t.text3, fontSize: T.micro + 0.5, marginTop: 3 },
+  exSide: { color: t.text3, fontSize: T.caption, fontWeight: '400' },
+  exTargets: { color: t.text3, fontSize: T.caption, marginTop: 3 },
   exSets: { color: t.accent, fontSize: T.body, fontWeight: '600', ...TNUM },
-  load: { color: t.warn, fontSize: T.micro + 1, lineHeight: 19, marginTop: 5 },
-  toggle: { color: t.accent, fontSize: T.micro + 1, marginTop: 7, opacity: 0.85 },
-  cueBox: {
-    marginTop: 8,
-    padding: 11,
-    borderRadius: R.xs,
-    gap: 5,
-  },
-  cue: { color: t.text2, fontSize: T.micro + 1.5, lineHeight: 20 },
-  warnText: { color: t.bad, fontSize: T.micro + 1, marginTop: 5 },
+  toggle: { color: t.accent, fontSize: T.caption, marginTop: 7, opacity: 0.85 },
+  cueBox: { marginTop: 8, padding: 11, borderRadius: R.xs, gap: 5 },
+  cue: { color: t.text2, fontSize: T.caption, lineHeight: 21 },
 }));

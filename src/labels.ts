@@ -73,7 +73,7 @@ export const STRATEGY: Record<string, string> = {
 /** 情景档位 */
 export const SCENARIO: Record<string, string> = {
   safe: '保守',
-  realistic: '现实',
+  realistic: '目标',
   ambitious: '激进',
 };
 

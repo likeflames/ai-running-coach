@@ -475,7 +475,7 @@ const useStyles = makeStyles((t: Theme) => ({
   caps: { flexDirection: 'row', gap: 6, marginTop: S.sm },
   cap: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   capText: { fontSize: T.micro, fontWeight: '500' },
-  meta: { fontSize: T.micro, marginTop: 6 },
+  meta: { fontSize: T.caption, marginTop: 6, lineHeight: 20 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: S.sm, marginTop: S.md },
   credForm: { marginTop: S.md, paddingTop: S.md, borderTopWidth: 0.5 },
 }));

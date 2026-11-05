@@ -8,8 +8,8 @@ import React from 'react';
 import { View, Text, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { api } from './api';
-import { Card, Btn } from './ui';
-import { S, type Theme } from './theme';
+import { Card, Btn, Fold } from './ui';
+import { S, T, type Theme } from './theme';
 import { useTheme } from './theme-provider';
 
 export interface PbMeta {
@@ -52,15 +52,20 @@ export function PbBadge({ pb }: { pb?: PbMeta | null }) {
   const ok = cur.calibrated !== false;
   return (
     <Card>
-      <Text style={{ color: ok ? t.good : t.warn, fontWeight: '600', fontSize: 13 }}>
+      <Text style={{ color: ok ? t.good : t.warn, fontWeight: '600', fontSize: T.caption + 1 }}>
         {ok ? '✓ 配速已按你的成绩校准' : '⚠ 配速尚未校准'}
       </Text>
-      <Text style={{ color: t.text2, fontSize: 12, marginTop: 6, lineHeight: 18 }}>
+      <Text style={{ color: t.text2, fontSize: T.caption, marginTop: 6, lineHeight: 20 }}>
         {ok
-          ? `${cur.text} · ${cur.source_label}${cur.estimated ? '（折算）' : ''}${cur.detail ? ' · ' + cur.detail : ''}`
-          : `暂用通用基线 ${cur.text} 排课 · ${cur.detail}`}
+          ? `${cur.text} · ${cur.source_label}${cur.estimated ? '（折算）' : ''}`
+          : `通用基线 ${cur.text}`}
       </Text>
-      <View style={{ flexDirection: 'row', gap: S.sm, marginTop: 10 }}>
+      {cur.detail ? (
+        <Fold label="成绩来源">
+          <Text style={{ color: t.text2, fontSize: T.caption, lineHeight: 21 }}>{cur.detail}</Text>
+        </Fold>
+      ) : null}
+      <View style={{ flexDirection: 'row', gap: S.sm, marginTop: S.sm }}>
         <Btn title={busy ? '识别中…' : '从历史记录识别'} onPress={auto} disabled={busy} small />
         <Btn title="手动填写" onPress={() => router.push('/profile')} small />
       </View>

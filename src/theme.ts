@@ -156,7 +156,7 @@ export function levelColor(t: Theme, level?: number) {
   return [t.bad, t.warn, t.good, t.accent][(level || 1) - 1] || t.good;
 }
 
-/** TSB（训练状态）→ 颜色 */
+/** 状态值（体能 − 疲劳）→ 颜色 */
 export function tsbColor(t: Theme, tsb: number) {
   if (tsb < -10) return t.bad;
   if (tsb < 0) return t.warn;

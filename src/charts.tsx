@@ -441,7 +441,7 @@ export function TrackShape({
   );
 }
 
-/* ---------- 半圆仪表：给「状态（TSB）」这类有正负区间的数值一个刻度 ---------- */
+/* ---------- 半圆仪表：给「状态值」这类有正负区间的数值一个刻度 ---------- */
 
 export function Gauge({
   value,
@@ -685,7 +685,7 @@ export function Bullet({
   min: number;
   max: number;
   color?: string;
-  /** 浅色参考区间，例如 ACWR 的 0.8–1.3 */
+  /** 浅色参考区间，例如负荷比的 0.8–1.3 */
   band?: { from: number; to: number };
   format?: (v: number) => string;
 }) {

@@ -12,9 +12,9 @@ import {
 } from '../../../src/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Markdown } from '../../../src/markdown';
-import { Screen, Card, Section, Btn, Loading, ErrorBox, Empty, Pill, List, Divider, Progress, Fold } from '../../../src/ui';
-import { Gauge, Donut, SegmentRing, RingLegend, Bullet, LineChart, Legend } from '../../../src/charts';
-import { S, T, TNUM, levelColor, tsbColor, recoveryColor, type Theme } from '../../../src/theme';
+import { Screen, Card, Section, Btn, Loading, ErrorBox, Empty, Pill, List, Progress, Fold } from '../../../src/ui';
+import { Gauge, Donut, SegmentRing, RingLegend, Bullet } from '../../../src/charts';
+import { S, T, R, TNUM, levelColor, tsbColor, recoveryColor, type Theme } from '../../../src/theme';
 import { makeStyles, useTheme } from '../../../src/theme-provider';
 import { F } from '../../../src/format';
 import { ACTIVITY_TYPE, zh } from '../../../src/labels';
@@ -190,7 +190,7 @@ export default function TodayScreen() {
   const recColor = recoveryColor(t, sleepScore);
   const hasAnyData = !!(rec.date || data.recent_activities?.length);
 
-  /* CTL/ATL 是负荷点数，没有绝对满分。条本身从 0 量到当前峰值，
+  /* 长期体能/近期疲劳是负荷点数，没有绝对满分。条本身从 0 量到当前峰值，
    * 浅色带标出近 14 天自己的区间，给数字一个可比的参照。 */
   const rangeFor = (vals: number[], cur: number) => {
     const all = [...vals, cur].filter((v) => Number.isFinite(v));
@@ -213,7 +213,7 @@ export default function TodayScreen() {
   const stages = [
     { label: '深睡', value: Number(rec.deep_minutes) || 0, color: '#5E5CE6' },
     { label: '浅睡', value: Number(rec.light_minutes) || 0, color: '#64D2FF' },
-    { label: 'REM', value: Number(rec.rem_minutes) || 0, color: '#BF5AF2' },
+    { label: '快速眼动', value: Number(rec.rem_minutes) || 0, color: '#BF5AF2' },
     { label: '清醒', value: Number(rec.awake_minutes) || 0, color: t.text3 },
   ];
   const hasStages = stages.some((x) => x.value > 0);
@@ -226,9 +226,9 @@ export default function TodayScreen() {
 
   const has = (v: any) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
   const metrics = [
-    has(rec.hrv) ? { label: '心率变异 HRV', value: `${F.num(rec.hrv, 0)} ms` } : null,
+    has(rec.hrv) ? { label: '心率变异', value: `${F.num(rec.hrv, 0)} 毫秒` } : null,
     has(rec.hrv_status)
-      ? { label: 'HRV 状态', value: HRV_STATUS_ZH[String(rec.hrv_status)] || String(rec.hrv_status) }
+      ? { label: '心率变异状态', value: HRV_STATUS_ZH[String(rec.hrv_status)] || String(rec.hrv_status) }
       : null,
     has(rec.body_battery) ? { label: '身体电量', value: `${F.num(rec.body_battery, 0)}%` } : null,
     has(rec.resting_hr) ? { label: '静息心率', value: `${F.num(rec.resting_hr, 0)} bpm` } : null,
@@ -250,9 +250,14 @@ export default function TodayScreen() {
     <Screen refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }}>
       <View style={s.topRow}>
         <Text style={[s.pageTitle, { color: t.text }]}>今天</Text>
-        <Pressable onPress={() => router.push('/settings')} hitSlop={12} style={s.gear}>
-          <Text style={[s.gearText, { color: t.text2 }]}>⚙</Text>
-        </Pressable>
+        <View style={s.topActions}>
+          <Pressable onPress={() => router.push('/data')} hitSlop={12} style={s.dataBtn}>
+            <Text style={s.dataText}>数据 ›</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push('/settings')} hitSlop={12} style={s.gear}>
+            <Text style={[s.gearText, { color: t.text2 }]}>⚙</Text>
+          </Pressable>
+        </View>
       </View>
 
       {!hasAnyData ? (
@@ -282,7 +287,7 @@ export default function TodayScreen() {
             max={30}
             height={162}
             color={tsbColor(t, fit.tsb || 0)}
-            caption="TSB · 体能 − 疲劳"
+            caption="状态值 · 体能 − 疲劳"
             format={(v) => `${v > 0 ? '+' : ''}${F.num(v, 1)}`}
             zones={[
               { from: -30, to: -10, color: t.bad },
@@ -293,7 +298,7 @@ export default function TodayScreen() {
           />
 
           <Bullet
-            label="体能储备 · CTL"
+            label="长期体能（42 天）"
             value={Number(fit.ctl) || 0}
             min={ctlRange.min}
             max={ctlRange.max}
@@ -302,7 +307,7 @@ export default function TodayScreen() {
             format={one}
           />
           <Bullet
-            label="近期疲劳 · ATL"
+            label="近期疲劳（7 天）"
             value={Number(fit.atl) || 0}
             min={atlRange.min}
             max={atlRange.max}
@@ -311,7 +316,7 @@ export default function TodayScreen() {
             format={one}
           />
           <Bullet
-            label="负荷比 · ACWR"
+            label="负荷比（近 7 天 / 42 天）"
             value={acwr}
             min={0}
             max={2}
@@ -320,31 +325,11 @@ export default function TodayScreen() {
             format={two}
           />
 
-          {history.length > 1 ? (
-            <View style={{ marginTop: S.md }}>
-              <Divider />
-              <Text style={[s.chartTitle, { color: t.text2 }]}>体能 / 疲劳</Text>
-              <LineChart
-                height={112}
-                yTicks={2}
-                labels={history.map((p) => F.dayShort(p.date))}
-                series={[
-                  { values: history.map((p) => p.ctl), color: t.accent, label: '体能', area: true },
-                  { values: history.map((p) => p.atl), color: t.warn, label: '疲劳' },
-                ]}
-              />
-              <Legend
-                items={[
-                  { color: t.accent, label: '体能 · CTL' },
-                  { color: t.warn, label: '疲劳 · ATL' },
-                ]}
-              />
-            </View>
-          ) : null}
-
-          <Text style={[s.foot, { color: t.text3 }]}>
-            本周跑量 {F.num(fit.weekly_km, 1)} 公里 · CTL 42 天 / ATL 7 天指数平均
-          </Text>
+          <Text style={[s.foot, { color: t.text3 }]}>本周跑量 {F.num(fit.weekly_km, 1)} 公里</Text>
+          <Fold label="指标定义">
+            <Text style={s.def}>状态值 = 长期体能 − 近期疲劳；浅色带是近 14 天你自己的区间。</Text>
+            <Text style={s.def}>长期体能按 42 天、近期疲劳按 7 天指数平均；负荷比参考 0.8–1.3。</Text>
+          </Fold>
         </Card>
       ) : null}
 
@@ -519,6 +504,9 @@ const useStyles = makeStyles((t: Theme) => ({
     paddingTop: S.sm,
   },
   pageTitle: { fontSize: T.title + 8, fontWeight: '700', letterSpacing: -0.8 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: S.sm },
+  dataBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: R.pill, backgroundColor: 'rgba(127,127,127,0.1)' },
+  dataText: { color: t.accent, fontSize: T.caption, fontWeight: '600' },
   gear: { padding: 6 },
   gearText: { fontSize: 22 },
 
@@ -542,12 +530,13 @@ const useStyles = makeStyles((t: Theme) => ({
   chartTitle: { fontSize: T.caption, marginTop: S.md, marginBottom: S.xs },
   metricGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   metricCell: { width: '50%', paddingVertical: 7, paddingRight: S.md },
-  metricLabel: { color: t.text3, fontSize: T.micro },
+  metricLabel: { color: t.text3, fontSize: T.caption },
   metricValue: { color: t.text, fontSize: T.body2, fontWeight: '500', marginTop: 2, ...TNUM },
 
   adviceText: { fontSize: 22, fontWeight: '600', letterSpacing: -0.5, lineHeight: 30 },
   adviceReason: { fontSize: T.body2, lineHeight: 21, marginTop: S.sm - 2 },
-  foot: { fontSize: T.micro, marginTop: S.sm, lineHeight: 17 },
+  foot: { fontSize: T.caption, marginTop: S.sm, lineHeight: 20 },
+  def: { color: t.text2, fontSize: T.caption, lineHeight: 21, marginBottom: 4 },
   hint: { fontSize: T.body2, lineHeight: 21 },
   regen: { fontSize: T.caption, fontWeight: '500' },
   errTitle: { fontSize: T.body2, fontWeight: '600', marginBottom: 4 },
