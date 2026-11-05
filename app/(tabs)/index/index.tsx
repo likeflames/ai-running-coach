@@ -14,7 +14,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Markdown } from '../../../src/markdown';
 import { Screen, Card, Section, Btn, Loading, ErrorBox, Empty, Pill, List, Progress, Fold } from '../../../src/ui';
 import { Gauge, Donut, SegmentRing, RingLegend, Bullet } from '../../../src/charts';
-import { S, T, R, TNUM, levelColor, tsbColor, recoveryColor, type Theme } from '../../../src/theme';
+import DataView from '../../../src/views/DataView';
+import { S, T, R, TNUM, alpha, levelColor, tsbColor, recoveryColor, type Theme } from '../../../src/theme';
 import { makeStyles, useTheme } from '../../../src/theme-provider';
 import { F } from '../../../src/format';
 import { ACTIVITY_TYPE, zh } from '../../../src/labels';
@@ -48,6 +49,9 @@ export default function TodayScreen() {
   const [adviceLoading, setAdviceLoading] = React.useState(false);
   const [adviceErr, setAdviceErr] = React.useState<string | null>(null);
   const [adviceThink, setAdviceThink] = React.useState(0);
+  /** build 17：「今天 / 数据」在页内切换，底部仍是 3 个主标签、图表仍只画一次 */
+  const [view, setView] = React.useState<'today' | 'data'>('today');
+  const [dataKey, setDataKey] = React.useState(0);
 
   const adviceBuf = React.useRef('');
   const advicePush = React.useRef(0);
@@ -174,14 +178,55 @@ export default function TodayScreen() {
     }
   };
 
-  if (loading) return <Loading />;
+  const header = (
+    <View style={s.topRow}>
+      <View style={s.segment}>
+        {([
+          ['today', '今天'],
+          ['data', '数据'],
+        ] as ['today' | 'data', string][]).map(([key, label]) => {
+          const active = view === key;
+          return (
+            <Pressable
+              key={key}
+              onPress={() => setView(key)}
+              style={[s.segItem, active && { backgroundColor: alpha(t.accent, t.dark ? 0.22 : 0.14) }]}
+            >
+              <Text style={[s.segText, active && { color: t.accent, fontWeight: '600' }]}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {view === 'data' ? (
+        <Pressable onPress={() => setDataKey((k) => k + 1)} hitSlop={12} style={s.gear}>
+          <Text style={[s.gearText, { color: t.accent }]}>⟳</Text>
+        </Pressable>
+      ) : null}
+      <Pressable onPress={() => router.push('/settings')} hitSlop={12} style={s.gear}>
+        <Text style={[s.gearText, { color: t.text2 }]}>⚙</Text>
+      </Pressable>
+    </View>
+  );
+
+  // 数据视图不依赖今日状态，独立渲染，避免今日接口加载中把图表页卡住
+  if (view === 'data') {
+    return (
+      <Screen>
+        {header}
+        <DataView key={dataKey} />
+      </Screen>
+    );
+  }
+
+  if (loading) return <Screen>{header}<Loading /></Screen>;
   if (err && !data)
     return (
       <Screen>
+        {header}
         <ErrorBox message={err} onRetry={() => load()} />
       </Screen>
     );
-  if (!data) return null;
+  if (!data) return <Screen>{header}</Screen>;
 
   const rec = data.recovery || ({} as any);
   const adv = data.recovery_advice || ({} as any);
@@ -248,17 +293,7 @@ export default function TodayScreen() {
 
   return (
     <Screen refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }}>
-      <View style={s.topRow}>
-        <Text style={[s.pageTitle, { color: t.text }]}>今天</Text>
-        <View style={s.topActions}>
-          <Pressable onPress={() => router.push('/data')} hitSlop={12} style={s.dataBtn}>
-            <Text style={s.dataText}>数据 ›</Text>
-          </Pressable>
-          <Pressable onPress={() => router.push('/settings')} hitSlop={12} style={s.gear}>
-            <Text style={[s.gearText, { color: t.text2 }]}>⚙</Text>
-          </Pressable>
-        </View>
-      </View>
+      {header}
 
       {!hasAnyData ? (
         <Card>
@@ -499,16 +534,21 @@ const useStyles = makeStyles((t: Theme) => ({
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: S.md,
-    paddingTop: S.sm,
+    gap: S.sm,
+    paddingTop: S.xs,
+    paddingBottom: S.md,
   },
-  pageTitle: { fontSize: T.title + 8, fontWeight: '700', letterSpacing: -0.8 },
-  topActions: { flexDirection: 'row', alignItems: 'center', gap: S.sm },
-  dataBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: R.pill, backgroundColor: 'rgba(127,127,127,0.1)' },
-  dataText: { color: t.accent, fontSize: T.caption, fontWeight: '600' },
-  gear: { padding: 6 },
-  gearText: { fontSize: 22 },
+  segment: {
+    flex: 1,
+    flexDirection: 'row',
+    padding: 3,
+    borderRadius: R.pill,
+    backgroundColor: t.cardInner,
+  },
+  segItem: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: R.pill },
+  segText: { color: t.text2, fontSize: T.body, fontWeight: '500' },
+  gear: { paddingHorizontal: 4, paddingVertical: 4 },
+  gearText: { fontSize: 20 },
 
   cardTop: {
     flexDirection: 'row',
