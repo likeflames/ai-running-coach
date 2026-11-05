@@ -178,7 +178,7 @@ export default function RaceView({ reloadKey = 0 }: { reloadKey?: number }) {
                 <Row label="赛前" value={`${F.num(nutrition.pre_race?.carb_load_g_per_day, 0)} 克/天 · ${nutrition.pre_race?.days ?? 1} 天`} />
                 <Row label="开赛前 1 小时" value={`${F.num(nutrition.pre_race?.last_hour_g, 0)} 克碳水`} />
                 <Row label="赛后 1 小时" value={`${F.num(nutrition.post_race?.carb_g, 0)} 克碳水 + ${F.num(nutrition.post_race?.protein_g, 0)} 克蛋白质`} />
-                <Fold label="计算依据">
+                <Fold label="补给依据">
                   <View style={s.basisList}>
                     {Object.entries(nutrition.basis || {}).map(([k, v]) => (
                       <Text key={k} style={s.basisLine}>{String(v)}</Text>
@@ -191,13 +191,13 @@ export default function RaceView({ reloadKey = 0 }: { reloadKey?: number }) {
           ) : null}
 
           {pacing?.basis ? (
-            <Section title="计算依据">
+            <Fold label="配速依据">
               <Card>
                 {Object.entries(pacing.basis).map(([k, v]) => (
                   <Text key={k} style={s.basisLine}>{String(v)}</Text>
                 ))}
               </Card>
-            </Section>
+            </Fold>
           ) : null}
         </>
       )}

@@ -231,8 +231,8 @@ export default function TodayScreen() {
       ? { label: '心率变异状态', value: HRV_STATUS_ZH[String(rec.hrv_status)] || String(rec.hrv_status) }
       : null,
     has(rec.body_battery) ? { label: '身体电量', value: `${F.num(rec.body_battery, 0)}%` } : null,
-    has(rec.resting_hr) ? { label: '静息心率', value: `${F.num(rec.resting_hr, 0)} bpm` } : null,
-    has(rec.night_hr) ? { label: '夜间心率', value: `${F.num(rec.night_hr, 0)} bpm` } : null,
+    has(rec.resting_hr) ? { label: '静息心率', value: `${F.num(rec.resting_hr, 0)} 次/分` } : null,
+    has(rec.night_hr) ? { label: '夜间心率', value: `${F.num(rec.night_hr, 0)} 次/分` } : null,
     has(rec.readiness_score) ? { label: '训练准备度', value: F.num(rec.readiness_score, 0) } : null,
     has(rec.recovery_time_min) ? { label: '恢复时间', value: F.duration(rec.recovery_time_min) } : null,
     has(rec.acute_load) ? { label: '急性负荷', value: F.num(rec.acute_load, 0) } : null,
