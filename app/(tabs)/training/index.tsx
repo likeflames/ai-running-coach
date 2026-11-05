@@ -12,7 +12,7 @@ import { Screen, Card, CardHead, Section, Loading, ErrorBox, Empty, Pill, Stat, 
 import { S, T, R, TNUM, alpha, type Theme } from '../../../src/theme';
 import { makeStyles, useTheme } from '../../../src/theme-provider';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { PbBadge, PersonalizationCard } from '../../../src/personalize';
+import { PbBadge } from '../../../src/personalize';
 import { F } from '../../../src/format';
 import { PHASE, PACE_ZONE, WORKOUT_TYPE, restLabel, setsLabel, zh } from '../../../src/labels';
 
@@ -120,7 +120,6 @@ export default function TrainingScreen() {
   return (
     <Screen>
       <PbBadge pb={(data as any).pb} />
-      <PersonalizationCard scope="training" />
 
       {/* 概览 */}
       <Card>
@@ -133,6 +132,11 @@ export default function TrainingScreen() {
           <Text style={s.summary}>
             本周：跑 {thisWeek.run_days} 天 · 力量 {thisWeek.strength.sessions} 次（
             {thisWeek.strength.sessions_required} 次必做）· {thisWeek.phase_label}
+          </Text>
+        ) : null}
+        {data.plan_basis ? (
+          <Text style={{ color: t.text3, fontSize: 11, lineHeight: 17, marginTop: 8 }}>
+            {`按${data.plan_basis.race_label}专项排课 · 起点 ${data.plan_basis.start_km} km/周\n${data.plan_basis.start_detail}；${data.plan_basis.race_detail}`}
           </Text>
         ) : null}
       </Card>

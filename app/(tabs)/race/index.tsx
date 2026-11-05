@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { PbBadge, PersonalizationCard } from '../../../src/personalize';
+import { PbBadge } from '../../../src/personalize';
 import { api } from '../../../src/api';
 import { Screen, Card, CardHead, Section, Row, Loading, ErrorBox, Empty, Stat, Pill, Hint, Btn } from '../../../src/ui';
 import { Legend, LineChart } from '../../../src/charts';
@@ -63,7 +63,6 @@ export default function RaceScreen() {
   return (
     <Screen>
       <PbBadge pb={pacing?.pb} />
-      <PersonalizationCard scope="race" />
 
       {/* 距离 / 策略 */}
       <Card>

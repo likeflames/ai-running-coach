@@ -23,6 +23,7 @@ interface Profile {
   five_k_pb_min: string;
   weight_kg: string;
   race_date: string;
+  race_distance_km: string;
 }
 
 /** 分数字符串 → "23:30" 这种好读的格式 */
@@ -65,6 +66,7 @@ export default function ProfileScreen() {
     five_k_pb_min: '',
     weight_kg: '',
     race_date: '',
+    race_distance_km: '',
   });
 
   React.useEffect(() => {
@@ -78,6 +80,7 @@ export default function ProfileScreen() {
           five_k_pb_min: r.profile.five_k_pb_min || '',
           weight_kg: r.profile.weight_kg || '',
           race_date: r.profile.race_date || '',
+          race_distance_km: r.profile.race_distance_km || '',
         });
       })
       .catch((e: any) => setErr(e?.message || '读取失败'))
@@ -90,6 +93,10 @@ export default function ProfileScreen() {
     if (pb === null) return setErr('5 公里成绩填成 23:30 这样的格式');
     const days = Number(f.weekly_days || 4);
     if (!Number.isFinite(days) || days < 1 || days > 7) return setErr('每周训练天数填 1–7');
+    const rd = f.race_distance_km.trim();
+    if (rd && (!Number.isFinite(Number(rd)) || Number(rd) < 1 || Number(rd) > 200)) {
+      return setErr('目标比赛距离填 1–200 之间的公里数，例如 21.1');
+    }
 
     setSaving(true);
     try {
@@ -100,6 +107,7 @@ export default function ProfileScreen() {
         five_k_pb_min: pb,
         weight_kg: f.weight_kg.trim(),
         race_date: f.race_date.trim(),
+        race_distance_km: rd,
       });
       Alert.alert('已保存', '训练配速和计划会按你的成绩重新计算。', [
         { text: '好', onPress: () => router.back() },
@@ -160,6 +168,14 @@ export default function ProfileScreen() {
               placeholder="2027-03-21"
               keyboard="numbers-and-punctuation"
               hint="填了才会按比赛倒排周期，不填就按 12 周通用安排。"
+            />
+            <Field
+              label="目标比赛距离（km）"
+              value={f.race_distance_km}
+              onChange={(v) => setF({ ...f, race_distance_km: v })}
+              placeholder="21.1 / 42.195 / 10"
+              keyboard="decimal-pad"
+              hint="决定课表按 5K / 10K / 半马 / 全马哪个专项排质量课和长距离。留空则从目标文字或历史最长跑量推断。"
             />
           </Card>
         </Section>

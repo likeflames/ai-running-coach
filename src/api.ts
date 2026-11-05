@@ -818,11 +818,23 @@ export interface PhaseOverview {
   week_to: number;
 }
 
+/** 这份课表是按哪些真实数据排的，展示给用户核对 */
+export interface PlanBasis {
+  start_km: number;
+  start_source: string;
+  start_detail: string;
+  race_distance_km: number;
+  race_label: string;
+  race_source: string;
+  race_detail: string;
+}
+
 export interface TrainingSchedule {
   vdot: number;
   paces: Record<string, string>;
   race_date: string;
   guardrail?: TrainingPlan['guardrail'];
+  plan_basis?: PlanBasis;
   weeks: ScheduleWeek[];
   programmes: Record<string, StrengthProgramme>;
   phase_overview: PhaseOverview[];
