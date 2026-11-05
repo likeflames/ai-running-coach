@@ -9,9 +9,15 @@ import { API_CANDIDATES, STORAGE_TOKEN_KEY } from './config';
  * 而这个 60 秒里往往是服务器正在重启 —— 等它重启完早就好了。所以压到 12s。 */
 const DEFAULT_TIMEOUT = 12000;
 const PROBE_TIMEOUT = 5000;
-const STORAGE_KEY = 'apiBase';
+/* 换过一次键名：旧版记住的是 http://IP，改域名优先后如果不换键，
+ * 覆盖安装的用户会一直被旧记忆绑在明文 IP 上（orderedBases 把记住的地址排第一，
+ * 而且内网 IP 响应比 TLS 握手快，几乎每次都赢）。换键 = 让旧记忆自然失效。
+ * 以后再换主地址，同样改这里的版本号即可。 */
+const STORAGE_KEY = 'apiBaseV2';
 
-let activeBase: string | null = null;
+/* 默认就认首选地址可用：这样首次启动的长请求（同步/流式对话）能拿到完整超时，
+ * 而不是被当成「探测」只给 5 秒。真连不上时，并发候选会兜住并自动切换。 */
+let activeBase: string | null = API_CANDIDATES[0];
 /** 某些机型上 fetch 走不通但 XHR 可以，记下来优先用 XHR */
 let preferXhr = false;
 /** 访问口令：服务器开了鉴权时每个请求都要带 */
