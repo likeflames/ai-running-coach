@@ -1,9 +1,9 @@
-{
+﻿{
   "expo": {
-    "name": "AI跑步教练",
+    "name": "AI璺戞鏁欑粌",
     "slug": "ai-running-coach",
     "owner": "likeflames",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "orientation": "portrait",
     "scheme": "runningcoach",
     "icon": "./assets/icon.png",
@@ -12,7 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.likeflames.runningcoach",
-      "buildNumber": "18",
+      "buildNumber": "19",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
@@ -24,7 +24,7 @@
             }
           }
         },
-        "NSLocalNetworkUsageDescription": "用于连接你的训练数据服务器，同步跑步与健康数据"
+        "NSLocalNetworkUsageDescription": "鐢ㄤ簬杩炴帴浣犵殑璁粌鏁版嵁鏈嶅姟鍣紝鍚屾璺戞涓庡仴搴锋暟鎹?
       }
     },
     "android": {
