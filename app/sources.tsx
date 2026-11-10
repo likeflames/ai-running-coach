@@ -136,7 +136,7 @@ export default function SourcesScreen() {
     }
   };
 
-  /** 真正跑同步。days=0 表示全部历史（活动全量 + 最近 30 天恢复数据） */
+  /** 真正跑同步。days=0 表示全部历史（活动全量 + 最近 90 天恢复数据）*/
   const runSync = async (src: SourceInfo, days: number) => {
     setBusy(src.id);
     try {

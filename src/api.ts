@@ -367,9 +367,18 @@ export const api = {
     request<T>(path, { method: 'DELETE' }, timeoutMs),
 
   /** 表单提交（后端多个接口用 FormData 接收） */
-  form: <T = any>(path: string, data: Record<string, string | number>, timeoutMs = DEFAULT_TIMEOUT) => {
+  form: <T = any>(
+    path: string,
+    data: Record<string, string | number>,
+    timeoutMs = DEFAULT_TIMEOUT,
+    files: { field: string; uri: string; name: string; mime?: string }[] = []
+  ) => {
     const fd = new FormData();
     Object.entries(data).forEach(([k, v]) => fd.append(k, String(v)));
+    // React Native 的 FormData 文件格式；web 端传 uri 也能工作（blob URI）
+    files.forEach((f) => {
+      fd.append(f.field, { uri: f.uri, name: f.name, type: f.mime || 'application/octet-stream' } as any);
+    });
     return request<T>(path, { method: 'POST', body: fd as any }, timeoutMs);
   },
 
@@ -428,6 +437,12 @@ export const authApi = {
 };
 
 /* ---------------- 流式对话（SSE） ---------------- */
+
+export interface ChatImage {
+  uri: string;
+  name?: string;
+  mime?: string;
+}
 
 export interface ChatEvent {
   t: 'reasoning' | 'content' | 'tool' | 'error' | 'done';
@@ -552,11 +567,19 @@ function streamOnce(
   message: string,
   history: { role: string; content: string }[],
   onEvent: (ev: ChatEvent) => void,
-  firstByteMs = 0
+  firstByteMs = 0,
+  image?: ChatImage | null
 ): Promise<void> {
   const fd = new FormData();
   fd.append('message', message);
   fd.append('history', JSON.stringify(history || []));
+  if (image?.uri) {
+    fd.append('image', {
+      uri: image.uri,
+      name: image.name || 'chat-image.jpg',
+      type: image.mime || 'image/jpeg',
+    } as any);
+  }
   return sseOnce(base, '/api/chat/stream', fd, onEvent, 300000, firstByteMs);
 }
 
@@ -626,6 +649,7 @@ export async function chatStream(
   message: string,
   history: { role: string; content: string }[],
   onEvent: (ev: ChatEvent) => void,
+  image?: ChatImage | null,
   retried = false
 ): Promise<void> {
   await ready;
@@ -639,7 +663,7 @@ export async function chatStream(
     try {
       await streamOnce(base, message, history, (ev) => {
         if (isSessionCurrent(gen)) onEvent(ev);
-      }, i === 0 ? PRIMARY_CONNECT_TIMEOUT : 0);
+      }, i === 0 ? PRIMARY_CONNECT_TIMEOUT : 0, image);
       return;
     } catch (e: any) {
       if (e?.started) throw e;
@@ -693,6 +717,8 @@ export interface Recovery {
 }
 
 export interface RecentActivity {
+  /** 活动主键；老版本后端不返回，前端会退回活动列表页 */
+  id?: number;
   date: string;
   type: string;
   duration_min: number;
@@ -867,6 +893,12 @@ export interface ScheduleWeek {
   planned_target_km?: number;
   week_target_km?: number;
   requested_km?: number;
+  /** 本周已经跑掉的公里数（只影响当前周） */
+  completed_km?: number;
+  /** 扣掉已完成跑量后的剩余目标 */
+  remaining_requested_km?: number;
+  /** 当前周为什么和常规目标不同（剩余天数/已完成跑量/限幅） */
+  week_note?: string;
   run_days: number;
   strength: {
     phase: string;

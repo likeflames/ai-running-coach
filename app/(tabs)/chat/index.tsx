@@ -12,9 +12,12 @@ import {
   Animated,
   Easing,
   Alert,
+  Image,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from 'expo-router';
-import { api, chatStream, ChatEvent, chatHistory, clearChatHistory } from '../../../src/api';
+import { api, chatStream, ChatEvent, ChatImage, chatHistory, clearChatHistory } from '../../../src/api';
 import { Markdown } from '../../../src/markdown';
 import { Glass } from '../../../src/glass';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +31,8 @@ interface Msg {
   thinking?: string;
   tool?: string;
   phase?: 'thinking' | 'answering' | 'done' | 'error';
+  /** 用户这轮附带的图片（只在本机显示，服务端不存图） */
+  imageUri?: string;
 }
 
 /** 流式期间最多多久把缓冲的文字刷到界面一次。token 到得比这更密，合并掉 */
@@ -43,10 +48,15 @@ const QUICK = [
 
 const TOOL_LABELS: Record<string, string> = {
   get_week_schedule: '正在查本周课表…',
+  get_run_history: '正在查历史跑步…',
+  get_cross_training: '正在查其他运动…',
+  get_activity_analysis: '正在算配速/心率曲线…',
   get_plan: '正在查自定义课表…',
   get_profile: '正在读你的档案…',
   update_profile: '正在更新档案…',
   set_plan_item: '正在写入课表…',
+  set_week_plan: '正在审核整周课表…',
+  vision: '正在识别图片…',
 };
 
 export default function ChatScreen() {
@@ -98,6 +108,8 @@ export default function ChatScreen() {
   const [input, setInput] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
+  /** 待发送的图片：只在这一轮存在，服务端不落盘 */
+  const [pendingImage, setPendingImage] = React.useState<ChatImage | null>(null);
 
   /** 正在输出的那条单独放 state，历史消息不跟着重渲染 */
   const [live, setLive] = React.useState<Msg | null>(null);
@@ -112,11 +124,16 @@ export default function ChatScreen() {
   const listRef = React.useRef<FlatList<Msg>>(null);
   /** 只关心一件事：教练服务现在能不能用。服务商、模型名、token 用量都是运维视角，不该出现在对话页 */
   const [available, setAvailable] = React.useState(true);
+  /** 服务端有没有可用的识图模型；没有就把上传入口藏起来，不让用户白试 */
+  const [visionAvailable, setVisionAvailable] = React.useState(true);
 
   const loadMeta = React.useCallback(() => {
     api
-      .get<{ configured?: boolean }>('/api/chat/model')
-      .then((m) => setAvailable(m?.configured !== false))
+      .get<{ configured?: boolean; vision?: boolean }>('/api/chat/model')
+      .then((m) => {
+        setAvailable(m?.configured !== false);
+        setVisionAvailable(m?.vision !== false);
+      })
       .catch(() => {});
   }, []);
 
@@ -214,14 +231,49 @@ export default function ChatScreen() {
     ]);
   }, [msgs.length]);
 
+  const pickImage = React.useCallback(async () => {
+    if (!visionAvailable) {
+      Alert.alert('识图还没配置', '服务端还没配置识图模型，先用文字描述吧。');
+      return;
+    }
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('需要相册权限', '去系统设置里允许访问相册，才能选择截图。');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.85,
+        selectionLimit: 1,
+        // iPhone 默认给 HEIC，后端只认 PNG/JPEG/WebP；用兼容模式让系统转成 JPEG
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      setPendingImage({
+        uri: asset.uri,
+        name: asset.fileName || `chat-${Date.now()}.jpg`,
+        mime: asset.mimeType || 'image/jpeg',
+      });
+    } catch (e: any) {
+      Alert.alert('选图失败', e?.message || '再试一次');
+    }
+  }, [visionAvailable]);
+
   const send = async (text?: string) => {
-    const msg = (text ?? input).trim();
-    if (!msg || busy) return;
+    const typed = (text ?? input).trim();
+    const image = pendingImage;
+    if ((!typed && !image) || busy) return;
+    const msg = typed || '看看这张图，结合我的训练数据分析一下。';
     setInput('');
+    setPendingImage(null);
     setBusy(true);
 
     const uid = `u${Date.now()}`;
-    const userMsg: Msg = { id: uid, role: 'user', text: msg };
+    const userMsg: Msg = { id: uid, role: 'user', text: msg, imageUri: image?.uri };
     setMsgs((list) => [...list, userMsg]);
 
     const aid = `a${Date.now()}`;
@@ -240,7 +292,7 @@ export default function ChatScreen() {
       await chatStream(msg, history_for(msg, msgs), (ev) => {
         if (ev.t === 'reasoning' || ev.t === 'content') gotAny = true;
         onEvent(ev);
-      });
+      }, image);
       const d = draft.current;
       if (d && !d.text.trim()) {
         d.text = d.phase === 'thinking' ? '（模型只输出了思考过程，没有给出正文，请再说一次或换个问法）' : '（无回复）';
@@ -254,7 +306,15 @@ export default function ChatScreen() {
           const data = await api.form<{ reply: string }>(
             '/api/chat',
             { message: msg, history: JSON.stringify(history_for(msg, msgs)) },
-            120000
+            120000,
+            image
+              ? [{
+                  field: 'image',
+                  uri: image.uri,
+                  name: image.name || 'chat-image.jpg',
+                  mime: image.mime || 'image/jpeg',
+                }]
+              : []
           );
           commit({ id: aid, role: 'assistant', text: data.reply || '（无回复）', phase: 'done' });
         } catch (e2: any) {
@@ -403,7 +463,31 @@ export default function ChatScreen() {
         kbInset 已经把「键盘盖住的高度」算进去了（见文件顶部的说明）。
         键盘在时只留一点呼吸，收起时让开系统标签栏。
       */}
+      {pendingImage ? (
+        <View style={s.attachRow}>
+          <Image source={{ uri: pendingImage.uri }} style={s.attachThumb} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.attachName} numberOfLines={1}>
+              {pendingImage.name || '已选择图片'}
+            </Text>
+            <Text style={s.attachHint}>发送后会先识别图表，再结合你的记录回答</Text>
+          </View>
+          <Pressable onPress={() => setPendingImage(null)} hitSlop={10} style={s.attachRemove}>
+            <Ionicons name="close" size={16} color={t.text3} />
+          </Pressable>
+        </View>
+      ) : null}
+
       <Glass style={[s.inputBar, { marginBottom: kbInset > 0 ? 8 : insets.bottom + 8 }]}>
+        <Pressable
+          onPress={pickImage}
+          disabled={busy}
+          hitSlop={8}
+          style={[s.attachBtn, { backgroundColor: t.card, opacity: busy ? 0.5 : 1 }]}
+          accessibilityLabel="添加图片"
+        >
+          <Ionicons name="image-outline" size={20} color={visionAvailable ? t.text2 : t.text3} />
+        </Pressable>
         <TextInput
           style={s.input}
           value={input}
@@ -443,6 +527,7 @@ const Bubble = React.memo(function Bubble({
   if (item.role === 'user') {
     return (
       <View style={[s.bubble, s.userBubble]}>
+        {item.imageUri ? <Image source={{ uri: item.imageUri }} style={s.bubbleImage} /> : null}
         <Text style={[s.bubbleText, { color: t.accentInk }]}>{item.text}</Text>
       </View>
     );
@@ -514,7 +599,7 @@ function history_for(msg: string, msgs: Msg[]) {
     .filter((m) => m.phase !== 'error')
     .map((m) => ({ role: m.role, content: m.text }));
   if (arr.length && arr[arr.length - 1].content === msg) arr.pop();
-  return arr.slice(-12);
+  return arr.slice(-24);
 }
 
 const useStyles = makeStyles((t: Theme) => ({
@@ -554,6 +639,29 @@ const useStyles = makeStyles((t: Theme) => ({
   thinkText: { color: t.text3, fontSize: T.micro + 1.5, lineHeight: 21 },
   toolChip: { color: t.accent, fontSize: T.micro + 1, marginBottom: 7 },
   typingText: { color: t.text3, fontSize: T.caption },
+  attachRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: S.sm,
+    marginHorizontal: S.md,
+    marginBottom: 6,
+    padding: S.sm,
+    borderRadius: R.md,
+    backgroundColor: t.card,
+  },
+  attachThumb: { width: 44, height: 44, borderRadius: 10, backgroundColor: t.bgSoft },
+  attachName: { color: t.text, fontSize: T.caption, fontWeight: '600' },
+  attachHint: { color: t.text3, fontSize: T.micro, marginTop: 2 },
+  attachRemove: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: t.bgSoft,
+  },
+  attachBtn: { width: 38, height: 38, borderRadius: R.sm, alignItems: 'center', justifyContent: 'center' },
+  bubbleImage: { width: 200, height: 140, borderRadius: 10, marginBottom: 6 },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',

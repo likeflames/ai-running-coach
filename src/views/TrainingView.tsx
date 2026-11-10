@@ -206,6 +206,7 @@ function WeekCard({
             {adjusted ? `（原 ${F.num(week.planned_target_km, 1)}，手动调整后）` : ''} · 跑{' '}
             {week.run_days} 天 · 力量 {week.strength.sessions} 次
           </Text>
+          {week.week_note ? <Text style={s.basis}>{week.week_note}</Text> : null}
         </View>
         <Pill text={week.phase_label || zh(PHASE, week.phase, '常规')} color={t.purple} />
       </Pressable>

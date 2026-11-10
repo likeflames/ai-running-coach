@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, Animated, Easing, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, Animated, Easing, ActivityIndicator, Alert } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import {
   api,
@@ -20,6 +20,15 @@ import { makeStyles, useTheme } from '../../../src/theme-provider';
 import { F } from '../../../src/format';
 import { ACTIVITY_TYPE, zh } from '../../../src/labels';
 
+/** /api/sources 的一项，只取同步需要看的那几个字段 */
+interface SourceBrief {
+  id: string;
+  name: string;
+  auth: string;
+  configured: boolean;
+  connected: boolean;
+}
+
 interface FitnessPoint {
   date: string;
   ctl: number;
@@ -38,6 +47,18 @@ const HRV_STATUS_ZH: Record<string, string> = {
   NORMAL: '正常',
 };
 
+/** 把模型给的 Markdown 压成一段纯文字，收起时只显示开头几行 */
+function plainPreview(md: string) {
+  return String(md)
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\|?[\s:|-]{3,}\|?\s*$/gm, '')
+    .replace(/[*`_>|]/g, ' ')
+    .replace(/\s*\n\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export default function TodayScreen() {
   const t = useTheme();
   const s = useStyles();
@@ -54,6 +75,11 @@ export default function TodayScreen() {
   /** build 17：「今天 / 数据」在页内切换，底部仍是 3 个主标签、图表仍只画一次 */
   const [view, setView] = React.useState<'today' | 'data'>('today');
   const [dataKey, setDataKey] = React.useState(0);
+  /** 教练建议默认收起，只留三行摘要；点「展开」才铺开全文 */
+  const [adviceOpen, setAdviceOpen] = React.useState(false);
+  /** 「最近训练」里的同步：拉所有能拉的数据源最近一周 */
+  const [syncing, setSyncing] = React.useState(false);
+  const [syncMsg, setSyncMsg] = React.useState<string | null>(null);
 
   const adviceBuf = React.useRef('');
   const advicePush = React.useRef(0);
@@ -112,6 +138,8 @@ export default function TodayScreen() {
     if (adviceLoading) return;
     const gen = getSessionGeneration();
     setAdviceLoading(true);
+    // 生成过程中必须看得见内容，收起状态先展开
+    setAdviceOpen(true);
     setAdviceErr(null);
     setAdvice('');
     adviceBuf.current = '';
@@ -177,6 +205,59 @@ export default function TodayScreen() {
         Animated.timing(adviceProg, { toValue: 1, duration: 260, useNativeDriver: false }).start();
         setAdviceLoading(false);
       }
+    }
+  };
+
+  /**
+   * 同步最近一周。
+   *
+   * 只拉「能拉的」数据源：
+   * - 佳明这类账号密码型，即使本次启动后还没登录过也能同步（后端会用存好的账号自动登录），
+   *   所以不能只看 connected，否则刚打开 App 时永远显示没东西可同步；
+   * - Oura 这类 OAuth 源必须已授权；
+   * - 苹果健康是手机推上来的，服务端没有可拉的接口，跳过。
+   *
+   * 串行执行：佳明会限流，两个源同时打反而更慢。
+   */
+  const syncWeek = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const d = await api.get<{ sources: SourceBrief[] }>('/api/sources');
+      const targets = (d.sources || []).filter(
+        (x) => x.auth !== 'push' && (x.connected || (x.auth === 'account' && x.configured))
+      );
+      if (!targets.length) {
+        Alert.alert('还没连数据源', '先到「我的 → 数据源」连一个，之后在这里点一下就能同步最近一周。');
+        return;
+      }
+
+      const lines: string[] = [];
+      for (const src of targets) {
+        try {
+          const r = await api.post<any>(`/api/sources/${src.id}/sync?days=7`, {}, 180000);
+          const newActs = Number(r?.activity?.activities) || 0;
+          const newRec = Number(r?.recovery?.recovery_days) || 0;
+          const bits: string[] = [];
+          if (newActs) bits.push(`新增 ${newActs} 条训练`);
+          if (newRec) bits.push(`更新 ${newRec} 天恢复`);
+          lines.push(`${src.name}：${bits.length ? bits.join('，') : '没有新数据'}`);
+        } catch (e: any) {
+          lines.push(`${src.name}：${e?.message || '同步失败'}`);
+        }
+      }
+
+      const now = new Date();
+      setSyncMsg(
+        `已同步最近一周 · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+      );
+      await load(true);
+      Alert.alert('同步完成', lines.join('\n'));
+    } catch (e: any) {
+      Alert.alert('同步没成功', e?.message || '稍后再试');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -520,13 +601,42 @@ export default function TodayScreen() {
         </Card>
       ) : null}
 
-      {/* ---------- AI 建议 ---------- */}
+      {/* ---------- AI 建议：默认收起，只留摘要 ---------- */}
       {hasAnyData ? (
-        <Section title="教练建议">
+        <Section
+          title="教练建议"
+          right={
+            advice && !adviceLoading ? (
+              <Pressable
+                onPress={() => setAdviceOpen((v) => !v)}
+                hitSlop={10}
+                style={s.foldToggle}
+              >
+                <Text style={[s.link, { color: t.accent }]}>{adviceOpen ? '收起' : '展开'}</Text>
+                <Text
+                  style={[
+                    s.foldChev,
+                    { color: t.accent, transform: [{ rotate: adviceOpen ? '90deg' : '0deg' }] },
+                  ]}
+                >
+                  ›
+                </Text>
+              </Pressable>
+            ) : null
+          }
+        >
           <Card>
             {advice ? (
               <>
-                <Markdown text={advice} />
+                {adviceOpen || adviceLoading ? (
+                  <Markdown text={advice} />
+                ) : (
+                  <Pressable onPress={() => setAdviceOpen(true)}>
+                    <Text style={[s.advicePreview, { color: t.text2 }]} numberOfLines={3}>
+                      {plainPreview(advice)}
+                    </Text>
+                  </Pressable>
+                )}
                 {adviceLoading ? (
                   <View style={{ marginTop: S.md }}>
                     <Progress value={adviceProg} height={4} />
@@ -572,15 +682,30 @@ export default function TodayScreen() {
         </Section>
       ) : null}
 
-      {/* ---------- 最近训练 ---------- */}
+      {/* ---------- 最近训练：右上角一键同步最近一周 ---------- */}
       <Section
         title="最近训练"
+        desc={syncing ? '正在同步最近一周…' : syncMsg || undefined}
         right={
-          data.recent_activities?.length ? (
-            <Pressable onPress={() => router.push('/activities')} hitSlop={8}>
-              <Text style={[s.link, { color: t.accent }]}>全部</Text>
+          <View style={s.sectionActions}>
+            <Pressable
+              onPress={syncWeek}
+              disabled={syncing}
+              hitSlop={8}
+              style={({ pressed }) => [
+                s.syncBtn,
+                { backgroundColor: alpha(t.accent, t.dark ? 0.18 : 0.12) },
+                (pressed || syncing) && { opacity: 0.6 },
+              ]}
+            >
+              <Text style={[s.syncText, { color: t.accent }]}>{syncing ? '同步中' : '同步'}</Text>
             </Pressable>
-          ) : null
+            {data.recent_activities?.length ? (
+              <Pressable onPress={() => router.push('/activities')} hitSlop={8}>
+                <Text style={[s.link, { color: t.accent }]}>全部</Text>
+              </Pressable>
+            ) : null}
+          </View>
         }
       >
         {data.recent_activities?.length ? (
@@ -590,7 +715,7 @@ export default function TodayScreen() {
             ))}
           </List>
         ) : (
-          <Empty text="还没有训练记录，去「我的 → 数据源」连一个" />
+          <Empty text="还没有训练记录，点右上角「同步」或去「我的 → 数据源」连一个" />
         )}
       </Section>
     </Screen>
@@ -600,8 +725,17 @@ export default function TodayScreen() {
 function ActivityRow({ a }: { a: RecentActivity }) {
   const s = useStyles();
   const t = useTheme();
+  const router = useRouter();
+  // 老版本后端不返回 id，这种情况退回「全部活动」列表，至少不是点了没反应
+  const open = () => {
+    if (a.id) router.push(`/activity/${a.id}`);
+    else router.push('/activities');
+  };
   return (
-    <View style={s.actRow}>
+    <Pressable
+      onPress={open}
+      style={({ pressed }) => [s.actRow, pressed && { backgroundColor: t.bgSoft }]}
+    >
       <View style={{ flex: 1, paddingRight: S.sm }}>
         <Text style={[s.actTitle, { color: t.text }]}>
           {F.dayShort(a.date)} · {zh(ACTIVITY_TYPE, a.type, '运动')}
@@ -610,7 +744,8 @@ function ActivityRow({ a }: { a: RecentActivity }) {
           {F.num(a.distance_km, 2)} 公里 · {a.avg_pace || '–'} · 心率 {F.num(a.avg_hr)}
         </Text>
       </View>
-    </View>
+      <Text style={[s.actChev, { color: t.text3 }]}>›</Text>
+    </Pressable>
   );
 }
 
@@ -659,6 +794,7 @@ const useStyles = makeStyles((t: Theme) => ({
 
   adviceText: { fontSize: 22, fontWeight: '600', letterSpacing: -0.5, lineHeight: 30 },
   adviceReason: { fontSize: T.body2, lineHeight: 21, marginTop: S.sm - 2 },
+  advicePreview: { fontSize: T.body2, lineHeight: 22 },
   foot: { fontSize: T.caption, marginTop: S.sm, lineHeight: 20 },
   def: { color: t.text2, fontSize: T.caption, lineHeight: 21, marginBottom: 4 },
   hint: { fontSize: T.body2, lineHeight: 21 },
@@ -666,6 +802,13 @@ const useStyles = makeStyles((t: Theme) => ({
   errTitle: { fontSize: T.body2, fontWeight: '600', marginBottom: 4 },
   errBody: { fontSize: T.caption, lineHeight: 19 },
   link: { fontSize: T.body },
+
+  /** 分组标题右侧的操作区（同步 / 全部） */
+  sectionActions: { flexDirection: 'row', alignItems: 'center', gap: S.md },
+  syncBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: R.pill },
+  syncText: { fontSize: T.caption, fontWeight: '500' },
+  foldToggle: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  foldChev: { fontSize: T.caption + 3, fontWeight: '500', marginTop: -1 },
 
   emptyTitle: { fontSize: T.title, fontWeight: '600', marginBottom: 6 },
   emptyBody: { fontSize: T.body2, lineHeight: 21 },
@@ -679,4 +822,5 @@ const useStyles = makeStyles((t: Theme) => ({
   },
   actTitle: { fontSize: T.body, letterSpacing: -0.2 },
   actMeta: { fontSize: T.caption, marginTop: 3, ...TNUM },
+  actChev: { fontSize: 22, fontWeight: '300', marginTop: -2 },
 }));
