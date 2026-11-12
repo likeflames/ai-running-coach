@@ -847,6 +847,9 @@ export interface TrainingPlan {
 
 export interface ScheduleRun {
   type: string;
+  /** 自定义显示标题（比赛/测试等特殊课），有就优先于 type 的中文名 */
+  label?: string;
+  title?: string;
   description: string;
   distance_km: number;
   target_pace: string;
@@ -867,6 +870,7 @@ export interface ScheduleStrength {
 export interface ScheduleOverride {
   type: string;
   label: string;
+  title?: string;
   distance_km?: number | null;
   pace?: string | null;
   note?: string | null;

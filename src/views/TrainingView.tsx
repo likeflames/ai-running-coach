@@ -290,7 +290,7 @@ function DayRow({
         ) : (
           <View style={[s.item, { borderLeftColor: t.accent }]}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 5, flexWrap: 'wrap' }}>
-              <Text style={s.itemTitle}>{zh(WORKOUT_TYPE, run!.type, '训练')}</Text>
+              <Text style={s.itemTitle}>{run!.label || zh(WORKOUT_TYPE, run!.type, '训练')}</Text>
               <Text style={[s.itemKm, { color: t.accent }]}>{F.num(run!.distance_km, 1)}</Text>
               <Text style={s.itemUnit}>公里</Text>
               {run!.target_pace && run!.target_pace !== '-' ? (
